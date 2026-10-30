@@ -1051,6 +1051,7 @@ const BookingApp = {
         clientName: this.currentClient.name,
         clientPhone: this.currentClient.phone,
         clientDni: this.currentClient.dni,
+        clientEmail: this.currentClient.email || '',
         profId: doc.id,
         serviceId: this.selectedService.id,
         serviceName: this.selectedService.name,
@@ -1060,7 +1061,7 @@ const BookingApp = {
         price: Number(this.selectedService.price) || 0,
         deposit: 0,
         depositMethod: null,
-        status: 'Pendiente', // Cita pendiente de confirmación presencial
+        status: 'Pendiente', // Cita pendiente de confirmación en recepción
         isOnline: true,
         createdBy: 'Reserva Web Online',
         createdAt: new Date().toISOString(),
