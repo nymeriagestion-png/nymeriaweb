@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Reserva tu Cita Online | NYMERIA - Clínica Avanzada y Odontología</title>
+  
+  <!-- Google Fonts: Cormorant Garamond & Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <link rel="icon" type="image/png" href="img/logo_nymeria.jpg">
+  <link rel="stylesheet" href="reservar.css?v=1.0">
+</head>
+<body class="booking-portal">
+
+  <!-- BACKGROUND GLOWS -->
+  <div class="bg-glow glow-top"></div>
+  <div class="bg-glow glow-bottom"></div>
+
+  <!-- MAIN WRAPPER -->
+  <div class="portal-wrapper">
+
+    <!-- TOP HEADER -->
+    <header class="portal-header">
+      <div class="header-inner">
+        <div class="brand-block">
+          <img src="img/logo_nymeria.jpg" alt="Nymeria Logo" class="brand-logo">
+          <div class="brand-text">
+            <span class="brand-tag"><i data-lucide="sparkles"></i> CLÍNICA AVANZADA Y ODONTOLOGÍA</span>
+            <h1 class="brand-name">NYMERIA</h1>
+            <p class="brand-location">Calle Venezuela, 38 • Valencia 46007</p>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <div class="live-status-badge">
+            <span class="status-dot pulse"></span>
+            <span>Agenda en Directo</span>
+          </div>
+          <a href="tel:643304897" class="btn-header-contact" title="Llamar a la clínica">
+            <i data-lucide="phone"></i>
+            <span>643 304 897</span>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <!-- STEP PROGRESS BAR -->
+    <nav class="stepper-nav" aria-label="Progreso de la reserva">
+      <div class="stepper-step active" id="nav-step-1" onclick="BookingApp.goToStep(1)">
+        <div class="step-circle"><span class="step-num">1</span><i data-lucide="check" class="step-check"></i></div>
+        <div class="step-label">
+          <span class="step-title">Identificación</span>
+          <span class="step-sub" id="nav-sub-client">Paciente</span>
+        </div>
+      </div>
+      <div class="step-divider"></div>
+
+      <div class="stepper-step" id="nav-step-2" onclick="BookingApp.goToStep(2)">
+        <div class="step-circle"><span class="step-num">2</span><i data-lucide="check" class="step-check"></i></div>
+        <div class="step-label">
+          <span class="step-title">Tratamiento</span>
+          <span class="step-sub" id="nav-sub-service">Seleccionar</span>
+        </div>
+      </div>
+      <div class="step-divider"></div>
+
+      <div class="stepper-step" id="nav-step-3" onclick="BookingApp.goToStep(3)">
+        <div class="step-circle"><span class="step-num">3</span><i data-lucide="check" class="step-check"></i></div>
+        <div class="step-label">
+          <span class="step-title">Fecha y Turno</span>
+          <span class="step-sub" id="nav-sub-slot">Hueco libre</span>
+        </div>
+      </div>
+      <div class="step-divider"></div>
+
+      <div class="stepper-step" id="nav-step-4" onclick="BookingApp.goToStep(4)">
+        <div class="step-circle"><span class="step-num">4</span><i data-lucide="check" class="step-check"></i></div>
+        <div class="step-label">
+          <span class="step-title">Confirmación</span>
+          <span class="step-sub">Resumen final</span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- MAIN CARD CONTAINER -->
+    <main class="portal-main">
+
+      <!-- =================================================================== -->
+      <!-- PASO 1: IDENTIFICACIÓN (YA SOY PACIENTE / NUEVO PACIENTE)           -->
+      <!-- =================================================================== -->
+      <section id="step-1" class="booking-section active">
+        <div class="section-heading">
+          <span class="gold-badge"><i data-lucide="user-check"></i> Paso 1 de 4</span>
+          <h2>Identificación del Paciente</h2>
+          <p>Para garantizar una reserva personalizada y vincularla a tu historial médico, indícanos si ya has asistido a la clínica o es tu primera visita.</p>
+        </div>
+
+        <!-- AUTH TABS -->
+        <div class="auth-tabs-wrap" id="auth-tabs-container">
+          <div class="auth-tabs">
+            <button type="button" class="auth-tab-btn active" id="tab-login-btn" onclick="BookingApp.switchAuthTab('login')">
+              <i data-lucide="key-round"></i>
+              <span>Ya soy Paciente</span>
+            </button>
+            <button type="button" class="auth-tab-btn" id="tab-register-btn" onclick="BookingApp.switchAuthTab('register')">
+              <i data-lucide="user-plus"></i>
+              <span>Soy Nuevo Paciente</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 1: YA SOY CLIENTE (LOGIN) -->
+        <div id="auth-tab-login" class="auth-tab-panel active">
+          <!-- LOGGED IN USER CARD (SHOWN WHEN AUTHENTICATED) -->
+          <div id="logged-user-card" class="logged-card hidden">
+            <div class="logged-card-inner">
+              <div class="logged-avatar">
+                <i data-lucide="user"></i>
+              </div>
+              <div class="logged-info">
+                <span class="badge-tag gold">Paciente Identificado</span>
+                <h3 id="logged-client-name" class="logged-name">-</h3>
+                <div class="logged-meta">
+                  <span><i data-lucide="phone"></i> <span id="logged-client-phone">-</span></span>
+                  <span>•</span>
+                  <span><i data-lucide="credit-card"></i> DNI: <span id="logged-client-dni">-</span></span>
+                  <span>•</span>
+                  <span><i data-lucide="mail"></i> <span id="logged-client-email">-</span></span>
+                </div>
+              </div>
+              <div class="logged-actions">
+                <button type="button" class="btn-logout" onclick="BookingApp.logoutClient()">
+                  <i data-lucide="log-out"></i> Cambiar / Salir
+                </button>
+              </div>
+            </div>
+
+            <!-- CITAS AGENDADAS DEL PACIENTE -->
+            <div id="client-upcoming-box" class="client-upcoming-box">
+              <div class="upcoming-box-header">
+                <h4 class="upcoming-title"><i data-lucide="calendar"></i> Tus Citas en Nymeria:</h4>
+                <span class="text-xs text-muted" id="upcoming-count-badge">Cargando citas...</span>
+              </div>
+              <div id="client-upcoming-list" class="upcoming-list"></div>
+            </div>
+
+            <div class="step-footer mt-4" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; padding-top:16px; border-top:1px solid var(--border-subtle);">
+              <span class="text-sm text-muted">¿Deseas programar una nueva visita o tratamiento?</span>
+              <button type="button" class="btn-portal btn-gold btn-large" onclick="BookingApp.goToStep(2)">
+                <i data-lucide="plus-circle"></i>
+                <span>Solicitar Nueva Cita</span>
+                <i data-lucide="arrow-right"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- LOGIN FORM (SHOWN WHEN NOT LOGGED IN) -->
+          <form id="form-login" class="auth-form" onsubmit="BookingApp.handleLogin(event)">
+            <div class="auth-intro-box">
+              <i data-lucide="info" class="text-gold"></i>
+              <div>
+                <strong>Acceso con credenciales de paciente</strong><br>
+                Introduce tu <b>correo electrónico o teléfono</b> registrado y tu <b>DNI/NIE con la letra en mayúscula</b> como contraseña.
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="login-identifier">
+                  <i data-lucide="mail"></i> Correo Electrónico o Teléfono Móvil:
+                </label>
+                <input type="text" id="login-identifier" class="portal-input" placeholder="ej. beatriz.montejo@gmail.com o 612884901" required autocomplete="username">
+              </div>
+
+              <div class="form-group">
+                <label for="login-password">
+                  <i data-lucide="lock"></i> Contraseña (DNI/NIE en Mayúsculas):
+                </label>
+                <div class="input-password-wrap">
+                  <input type="password" id="login-password" class="portal-input" placeholder="ej. 48912301X" required autocomplete="current-password">
+                  <button type="button" class="btn-toggle-pass" onclick="BookingApp.togglePassVisibility('login-password')">
+                    <i data-lucide="eye" id="login-pass-icon"></i>
+                  </button>
+                </div>
+                <small class="field-hint">Tu contraseña personal corresponde a tu DNI/NIE registrado con la letra en MAYÚSCULAS.</small>
+              </div>
+            </div>
+
+            <div id="login-feedback" class="feedback-msg hidden"></div>
+
+            <div class="auth-actions">
+              <button type="submit" class="btn-portal btn-gold" id="btn-submit-login">
+                <i data-lucide="log-in"></i>
+                <span>Acceder y Continuar</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- TAB 2: SOY NUEVO PACIENTE (REGISTRO) -->
+        <div id="auth-tab-register" class="auth-tab-panel">
+          <form id="form-register" class="auth-form" onsubmit="BookingApp.handleRegister(event)">
+            <div class="auth-intro-box">
+              <i data-lucide="sparkles" class="text-gold"></i>
+              <div>
+                <strong>Registro rápido de nuevo paciente</strong><br>
+                Completa tus datos para abrir tu ficha de paciente. Tus credenciales para próximas reservas serán tu <b>email/teléfono</b> y tu <b>DNI con letra mayúscula</b>.
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-group full-width">
+                <label for="reg-name"><i data-lucide="user"></i> Nombre y Apellidos completos *</label>
+                <input type="text" id="reg-name" class="portal-input" placeholder="ej. Laura Sánchez Gómez" required>
+              </div>
+
+              <div class="form-group">
+                <label for="reg-phone"><i data-lucide="phone"></i> Teléfono Móvil (WhatsApp citas) *</label>
+                <input type="tel" id="reg-phone" class="portal-input" placeholder="ej. 612 345 678" required>
+              </div>
+
+              <div class="form-group">
+                <label for="reg-dni"><i data-lucide="credit-card"></i> DNI / NIE (con letra en mayúscula) *</label>
+                <input type="text" id="reg-dni" class="portal-input uppercase-input" placeholder="ej. 12345678Z" maxlength="12" required>
+              </div>
+
+              <div class="form-group full-width">
+                <label for="reg-email"><i data-lucide="mail"></i> Correo Electrónico (confirmaciones y recordatorios) *</label>
+                <input type="email" id="reg-email" class="portal-input" placeholder="ej. laura.sanchez@gmail.com" required>
+              </div>
+
+              <div class="form-group full-width">
+                <label for="reg-allergies"><i data-lucide="alert-circle"></i> Alergias o condiciones médicas relevantes (opcional)</label>
+                <input type="text" id="reg-allergies" class="portal-input" placeholder="ej. Alergia al látex, medicamentos, anticoagulantes o ninguna conocida">
+              </div>
+
+              <div class="form-group full-width">
+                <label for="reg-notes"><i data-lucide="message-square"></i> Motivo de consulta u observaciones previas (opcional)</label>
+                <textarea id="reg-notes" class="portal-input textarea" rows="2" placeholder="ej. Primera valoración de aumento de labios, dudas sobre tratamiento..."></textarea>
+              </div>
+
+              <div class="form-group full-width">
+                <label class="consent-checkbox-wrap">
+                  <input type="checkbox" id="reg-lopd" required>
+                  <span class="custom-check"></span>
+                  <span class="check-text">
+                    Acepto el tratamiento de mis datos de salud de acuerdo con el <b>Reglamento General de Protección de Datos (RGPD)</b> y la Ley de Autonomía del Paciente para la gestión de citas y asistencia sanitaria por parte de <b>NYMERIA - CLÍNICA AVANZADA Y ODONTOLOGÍA S.L.</b>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div id="register-feedback" class="feedback-msg hidden"></div>
+
+            <div class="auth-actions">
+              <button type="submit" class="btn-portal btn-gold" id="btn-submit-register">
+                <i data-lucide="user-plus"></i>
+                <span>Registrar Paciente y Continuar</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- =================================================================== -->
+      <!-- PASO 2: SELECCIÓN DE TRATAMIENTO                                    -->
+      <!-- =================================================================== -->
+      <section id="step-2" class="booking-section">
+        <div class="section-heading">
+          <span class="gold-badge"><i data-lucide="sparkles"></i> Paso 2 de 4</span>
+          <h2>Selecciona tu Tratamiento</h2>
+          <p>Explora nuestras especialidades clínicas con tarifas transparentes y tiempos exactos de consulta.</p>
+        </div>
+
+        <!-- SEARCH AND FILTER CONTROLS -->
+        <div class="catalog-controls">
+          <div class="search-input-wrap">
+            <i data-lucide="search"></i>
+            <input type="text" id="service-search-input" class="portal-input search-input" placeholder="Buscar por tratamiento (ej. botox, labios, ortodoncia, láser, madero...)" oninput="BookingApp.filterServices()">
+            <button type="button" class="clear-search-btn hidden" id="clear-search-btn" onclick="BookingApp.clearServiceSearch()">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+
+          <div class="category-pills" id="category-pills">
+            <button type="button" class="cat-pill active" data-category="all" onclick="BookingApp.selectCategory('all')">
+              <i data-lucide="layout-grid"></i> Todos
+            </button>
+            <button type="button" class="cat-pill" data-category="medico" onclick="BookingApp.selectCategory('medico')">
+              <i data-lucide="sparkles"></i> Medicina Estética
+            </button>
+            <button type="button" class="cat-pill" data-category="odontologia" onclick="BookingApp.selectCategory('odontologia')">
+              <i data-lucide="smile"></i> Odontología
+            </button>
+            <button type="button" class="cat-pill" data-category="laser" onclick="BookingApp.selectCategory('laser')">
+              <i data-lucide="zap"></i> Láser Diodo
+            </button>
+            <button type="button" class="cat-pill" data-category="pestanas" onclick="BookingApp.selectCategory('pestanas')">
+              <i data-lucide="eye"></i> Mirada & Pestañas
+            </button>
+            <button type="button" class="cat-pill" data-category="maderoterapia" onclick="BookingApp.selectCategory('maderoterapia')">
+              <i data-lucide="flower-2"></i> Maderoterapia
+            </button>
+          </div>
+        </div>
+
+        <!-- SELECTED SERVICE FLOATING BADGE -->
+        <div id="selected-service-banner" class="selected-service-banner hidden">
+          <div class="banner-inner">
+            <div class="banner-badge"><i data-lucide="check-circle-2"></i> Tratamiento Seleccionado</div>
+            <div class="banner-details">
+              <strong id="banner-serv-name">-</strong>
+              <span id="banner-serv-meta" class="text-sm text-gold">-</span>
+            </div>
+            <button type="button" class="btn-portal btn-sm btn-gold" onclick="BookingApp.goToStep(3)">
+              <span>Elegir Horario</span> <i data-lucide="arrow-right"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- SERVICES CARDS GRID -->
+        <div id="services-grid" class="services-grid">
+          <!-- Injected dynamically via JS -->
+          <div class="loading-box">
+            <i data-lucide="loader" class="spin text-gold"></i>
+            <p>Cargando catálogo oficial de Nymeria Clínica...</p>
+          </div>
+        </div>
+
+        <div class="step-nav-footer">
+          <button type="button" class="btn-portal btn-secondary" onclick="BookingApp.goToStep(1)">
+            <i data-lucide="arrow-left"></i> <span>Volver a Paciente</span>
+          </button>
+          <button type="button" class="btn-portal btn-gold" id="btn-next-step2" disabled onclick="BookingApp.goToStep(3)">
+            <span>Continuar a Fecha y Hora</span> <i data-lucide="arrow-right"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- =================================================================== -->
+      <!-- PASO 3: ESPECIALISTA, FECHA Y HORARIO LIBRE                         -->
+      <!-- =================================================================== -->
+      <section id="step-3" class="booking-section">
+        <div class="section-heading">
+          <span class="gold-badge"><i data-lucide="calendar"></i> Paso 3 de 4</span>
+          <h2>Especialista y Horario Libre</h2>
+          <p>La agenda se calcula en tiempo real. Selecciona tu profesional de confianza o permite asignación según disponibilidad.</p>
+        </div>
+
+        <!-- DOCTOR SELECTOR -->
+        <div class="doctor-picker-card">
+          <label for="doctor-select" class="picker-label">
+            <i data-lucide="stethoscope" class="text-gold"></i> Especialista Médico / Profesional:
+          </label>
+          <div class="doctor-select-wrap">
+            <select id="doctor-select" class="portal-select" onchange="BookingApp.handleDoctorChange()">
+              <!-- Options populated dynamically -->
+            </select>
+          </div>
+          <div id="doctor-bio-box" class="doctor-bio-box">
+            <div class="doctor-avatar-circle" id="doc-avatar">Dr</div>
+            <div class="doctor-bio-text">
+              <strong id="doc-name">-</strong>
+              <span id="doc-role">-</span>
+              <span id="doc-room" class="doc-room-tag">-</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- DATE PICKER HORIZONTAL CAROUSEL -->
+        <div class="calendar-section">
+          <div class="calendar-header">
+            <div class="cal-title">
+              <i data-lucide="calendar-days" class="text-gold"></i>
+              <span>Días Laborables Disponibles (Lunes a Viernes)</span>
+            </div>
+            <div class="cal-nav-buttons">
+              <button type="button" class="cal-nav-btn" onclick="BookingApp.scrollCalendar(-1)" title="Días anteriores">
+                <i data-lucide="chevron-left"></i>
+              </button>
+              <button type="button" class="cal-nav-btn" onclick="BookingApp.scrollCalendar(1)" title="Siguientes días">
+                <i data-lucide="chevron-right"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="days-carousel-wrap">
+            <div id="days-carousel" class="days-carousel">
+              <!-- Dynamically populated day buttons -->
+            </div>
+          </div>
+        </div>
+
+        <!-- TIME SLOTS CONTAINER -->
+        <div class="slots-section">
+          <div class="slots-header">
+            <div>
+              <h3 class="slots-title">
+                <i data-lucide="clock" class="text-gold"></i>
+                <span>Turnos libres para el: <b id="cur-day-display" class="text-gold">-</b></span>
+              </h3>
+              <p class="slots-subtitle" id="slots-duration-hint">Franjas adaptadas a la duración de tu consulta</p>
+            </div>
+            <div class="slots-legend">
+              <span class="legend-item"><span class="legend-chip free"></span> Libre</span>
+              <span class="legend-item"><span class="legend-chip selected"></span> Seleccionado</span>
+              <span class="legend-item"><span class="legend-chip busy"></span> Ocupado</span>
+            </div>
+          </div>
+
+          <!-- MORNING SLOTS -->
+          <div class="turn-group">
+            <h4 class="turn-title"><i data-lucide="sun"></i> Turno de Mañana (10:00 - 14:00)</h4>
+            <div id="morning-slots" class="slots-grid">
+              <div class="slots-placeholder">Selecciona un día en el calendario arriba.</div>
+            </div>
+          </div>
+
+          <!-- AFTERNOON SLOTS -->
+          <div class="turn-group mt-3">
+            <h4 class="turn-title"><i data-lucide="sunset"></i> Turno de Tarde (16:00 - 20:00)</h4>
+            <div id="afternoon-slots" class="slots-grid">
+              <div class="slots-placeholder">Selecciona un día en el calendario arriba.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="step-nav-footer">
+          <button type="button" class="btn-portal btn-secondary" onclick="BookingApp.goToStep(2)">
+            <i data-lucide="arrow-left"></i> <span>Volver a Tratamientos</span>
+          </button>
+          <button type="button" class="btn-portal btn-gold" id="btn-next-step3" disabled onclick="BookingApp.goToStep(4)">
+            <span>Revisar y Confirmar</span> <i data-lucide="arrow-right"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- =================================================================== -->
+      <!-- PASO 4: RESUMEN Y CONFIRMACIÓN                                      -->
+      <!-- =================================================================== -->
+      <section id="step-4" class="booking-section">
+        <div class="section-heading">
+          <span class="gold-badge"><i data-lucide="clipboard-check"></i> Paso 4 de 4</span>
+          <h2>Revisa y Confirma tu Reserva</h2>
+          <p>Verifica todos los detalles de tu cita. La reserva quedará sincronizada en la agenda médica y recibirás la confirmación de inmediato.</p>
+        </div>
+
+        <div class="summary-card">
+          <div class="summary-card-header">
+            <div class="sch-brand">
+              <img src="img/logo_nymeria.jpg" alt="Logo" class="summary-logo">
+              <div>
+                <h3 class="summary-title">NYMERIA - CLÍNICA AVANZADA</h3>
+                <p class="summary-sub">Reserva de Cita Online</p>
+              </div>
+            </div>
+            <div class="summary-badge-gold">
+              <i data-lucide="shield-check"></i> Confirmación Inmediata
+            </div>
+          </div>
+
+          <div class="summary-body">
+            <!-- TRATAMIENTO -->
+            <div class="summary-row">
+              <div class="sum-icon-col"><i data-lucide="sparkles"></i></div>
+              <div class="sum-text-col">
+                <span class="sum-label">Tratamiento Clínico</span>
+                <strong id="sum-serv-name" class="sum-value">-</strong>
+                <span id="sum-serv-desc" class="sum-desc">-</span>
+              </div>
+              <div class="sum-price-col">
+                <span class="sum-price-tag" id="sum-serv-price">- €</span>
+                <span class="sum-dur-tag" id="sum-serv-dur">- min</span>
+              </div>
+            </div>
+
+            <!-- ESPECIALISTA Y GABINETE -->
+            <div class="summary-row">
+              <div class="sum-icon-col"><i data-lucide="stethoscope"></i></div>
+              <div class="sum-text-col">
+                <span class="sum-label">Especialista y Gabinete Asignado</span>
+                <strong id="sum-doc-name" class="sum-value">-</strong>
+                <span id="sum-doc-room" class="sum-desc">-</span>
+              </div>
+            </div>
+
+            <!-- FECHA Y HORA -->
+            <div class="summary-row highlight">
+              <div class="sum-icon-col"><i data-lucide="calendar"></i></div>
+              <div class="sum-text-col">
+                <span class="sum-label">Fecha y Franja Horaria</span>
+                <strong id="sum-date-time" class="sum-value text-gold">-</strong>
+                <span class="sum-desc">Horario confirmado en tiempo real</span>
+              </div>
+            </div>
+
+            <!-- DATOS DEL PACIENTE -->
+            <div class="summary-row">
+              <div class="sum-icon-col"><i data-lucide="user"></i></div>
+              <div class="sum-text-col">
+                <span class="sum-label">Datos del Paciente</span>
+                <strong id="sum-client-name" class="sum-value">-</strong>
+                <div class="sum-meta-tags">
+                  <span><i data-lucide="phone"></i> <span id="sum-client-phone">-</span></span>
+                  <span><i data-lucide="credit-card"></i> DNI: <span id="sum-client-dni">-</span></span>
+                  <span><i data-lucide="mail"></i> <span id="sum-client-email">-</span></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- NOTAS ADICIONALES -->
+            <div class="summary-extra">
+              <label for="booking-final-notes">
+                <i data-lucide="message-square"></i> Observaciones adicionales para el especialista (opcional):
+              </label>
+              <textarea id="booking-final-notes" class="portal-input textarea" rows="2" placeholder="Indica si vienes acompañado, dudas sobre la anestesia, preferencias..."></textarea>
+            </div>
+
+            <!-- POLÍTICA DE CITAS -->
+            <div class="policy-notice">
+              <i data-lucide="info" class="text-gold"></i>
+              <div>
+                <b>Pago en Clínica y Política de Cancelación:</b><br>
+                El importe se abonará directamente en recepción el día de tu cita (efectivo o tarjeta). Si necesitas modificar o anular tu turno, te rogamos nos avises con al menos 24 horas de antelación para ceder el hueco a otro paciente.
+              </div>
+            </div>
+          </div>
+
+          <div class="summary-card-footer">
+            <button type="button" class="btn-portal btn-secondary" onclick="BookingApp.goToStep(3)">
+              <i data-lucide="arrow-left"></i> <span>Modificar Horario</span>
+            </button>
+
+            <button type="button" class="btn-portal btn-gold btn-large" id="btn-confirm-booking" onclick="BookingApp.submitBooking()">
+              <i data-lucide="check-circle-2"></i>
+              <span>Confirmar Mi Reserva Online</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- =================================================================== -->
+      <!-- PASO 5: ÉXITO / RESERVA CONFIRMADA                                 -->
+      <!-- =================================================================== -->
+      <section id="step-5" class="booking-section">
+        <div class="success-screen">
+          <div class="success-icon-wrap">
+            <div class="success-circle">
+              <i data-lucide="check" class="success-check-icon"></i>
+            </div>
+          </div>
+
+          <span class="gold-badge"><i data-lucide="sparkles"></i> ¡Reserva Confirmada con Éxito!</span>
+          <h2 class="success-title">Tu cita está agendada en NYMERIA</h2>
+          <p class="success-subtitle">Hemos registrado tu reserva en la agenda médica y enviado el justificante a tu correo electrónico.</p>
+
+          <div class="success-ticket">
+            <div class="ticket-header">
+              <span class="ticket-label">Localizador de Cita</span>
+              <strong class="ticket-code" id="success-ref-code">NYM-WEB-00000</strong>
+            </div>
+
+            <div class="ticket-details-grid">
+              <div class="td-item">
+                <span class="td-label"><i data-lucide="sparkles"></i> Tratamiento</span>
+                <strong class="td-value" id="success-service-name">-</strong>
+              </div>
+              <div class="td-item">
+                <span class="td-label"><i data-lucide="calendar"></i> Fecha y Hora</span>
+                <strong class="td-value text-gold" id="success-date-time">-</strong>
+              </div>
+              <div class="td-item">
+                <span class="td-label"><i data-lucide="stethoscope"></i> Profesional</span>
+                <strong class="td-value" id="success-doctor-name">-</strong>
+              </div>
+              <div class="td-item">
+                <span class="td-label"><i data-lucide="user"></i> Paciente</span>
+                <strong class="td-value" id="success-client-name">-</strong>
+              </div>
+            </div>
+
+            <div class="ticket-address">
+              <i data-lucide="map-pin" class="text-gold"></i>
+              <div>
+                <strong>Calle Venezuela, 38, 46007 Valencia</strong><br>
+                <small class="text-muted">A 2 minutos de Plaza de Jesús / Estación Joaquín Sorolla</small>
+              </div>
+            </div>
+          </div>
+
+          <div class="success-actions">
+            <a id="btn-add-calendar" href="#" target="_blank" class="btn-portal btn-gold" rel="noopener">
+              <i data-lucide="calendar-plus"></i>
+              <span>Añadir a Google Calendar</span>
+            </a>
+
+            <button type="button" class="btn-portal btn-secondary" onclick="window.print()">
+              <i data-lucide="printer"></i>
+              <span>Imprimir / Guardar PDF</span>
+            </button>
+
+            <button type="button" class="btn-portal btn-ghost" onclick="BookingApp.resetPortal()">
+              <i data-lucide="plus-circle"></i>
+              <span>Reservar Otra Cita</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="portal-footer">
+      <div class="footer-inner">
+        <p>© 2026 <b>NYMERIA CLÍNICA AVANZADA Y ODONTOLOGÍA S.L.</b> • Todos los derechos reservados.</p>
+        <p class="footer-links">
+          <span>Registro Sanitario Oficial</span> • 
+          <span>Calle Venezuela, 38, Valencia</span> • 
+          <a href="tel:643304897">643 304 897</a>
+        </p>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- SCRIPT -->
+  <script src="reservar.js?v=1.0"></script>
+</body>
+</html>
