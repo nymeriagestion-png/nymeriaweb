@@ -511,7 +511,7 @@ const BookingApp = {
             <p class="sc-desc">${s.description || 'Consulta clínica de diagnóstico y aplicación del procedimiento médico-estético.'}</p>
           </div>
           <div class="sc-bottom">
-            <span class="sc-price">${Number(s.price).toFixed(0)} €</span>
+            <span class="sc-price">${Number(s.price) === 0 ? 'Gratuito' : Number(s.price).toFixed(0) + ' €'}</span>
             <button type="button" class="btn-select-serv">
               ${isSelected ? '✓ Seleccionado' : 'Seleccionar'}
             </button>
@@ -537,7 +537,7 @@ const BookingApp = {
     if (banner) {
       banner.classList.remove('hidden');
       document.getElementById('banner-serv-name').textContent = serv.name;
-      document.getElementById('banner-serv-meta').textContent = `${serv.duration} min • Tarifa Oficial: ${serv.price} €`;
+      document.getElementById('banner-serv-meta').textContent = `${serv.duration} min • Tarifa Oficial: ${Number(serv.price) === 0 ? 'Gratuito (0 €)' : serv.price + ' €'}`;
     }
 
     // Habilitar botón de continuar
@@ -945,7 +945,7 @@ const BookingApp = {
 
     document.getElementById('sum-serv-name').textContent = this.selectedService.name;
     document.getElementById('sum-serv-desc').textContent = this.selectedService.description || 'Consulta médica y tratamiento en cabina clínica.';
-    document.getElementById('sum-serv-price').textContent = `${Number(this.selectedService.price).toFixed(0)} €`;
+    document.getElementById('sum-serv-price').textContent = Number(this.selectedService.price) === 0 ? 'Gratuito (0 €)' : `${Number(this.selectedService.price).toFixed(0)} €`;
     document.getElementById('sum-serv-dur').textContent = `${this.selectedService.duration} min`;
 
     document.getElementById('sum-doc-name').textContent = doc.name;
@@ -961,11 +961,39 @@ const BookingApp = {
     this.initIcons();
   },
 
+  toggleGrouponField() {
+    const chk = document.getElementById('online-has-groupon');
+    const field = document.getElementById('online-groupon-field');
+    const sumPrice = document.getElementById('sum-serv-price');
+    if (chk && field) {
+      field.style.display = chk.checked ? 'block' : 'none';
+      if (sumPrice && this.selectedService) {
+        if (chk.checked) {
+          sumPrice.textContent = 'Cupón Groupon';
+        } else {
+          sumPrice.textContent = Number(this.selectedService.price) === 0 ? 'Gratuito (0 €)' : `${Number(this.selectedService.price).toFixed(0)} €`;
+        }
+      }
+      if (chk.checked) {
+        document.getElementById('online-groupon-code')?.focus();
+      }
+    }
+  },
+
   // ========================================================================
   // CONFIRMACIÓN Y GUARDADO EN GITHUB
   // ========================================================================
   async submitBooking() {
     const btn = document.getElementById('btn-confirm-booking');
+    const hasGroupon = document.getElementById('online-has-groupon')?.checked;
+    const grouponCode = hasGroupon ? (document.getElementById('online-groupon-code')?.value.trim() || '') : '';
+
+    if (hasGroupon && !grouponCode) {
+      alert('Por favor introduce tu Código de Cupón de Groupon antes de confirmar la cita.');
+      document.getElementById('online-groupon-code')?.focus();
+      return;
+    }
+
     if (btn) {
       btn.disabled = true;
       btn.innerHTML = `<i data-lucide="loader" class="spin"></i> <span>Guardando cita en la agenda...</span>`;
@@ -1058,14 +1086,20 @@ const BookingApp = {
         date: this.selectedDate,
         time: this.selectedSlot.time,
         duration: Number(this.selectedService.duration) || 45,
-        price: Number(this.selectedService.price) || 0,
+        price: hasGroupon ? 0 : (Number(this.selectedService.price) || 0),
+        originalPrice: Number(this.selectedService.price) || 0,
+        origin: hasGroupon ? 'groupon' : 'habitual',
+        grouponCode: hasGroupon ? grouponCode : '',
+        grouponPaymentType: hasGroupon ? 'prepago' : null,
         deposit: 0,
         depositMethod: null,
         status: 'Pendiente', // Cita pendiente de confirmación en recepción
         isOnline: true,
-        createdBy: 'Reserva Web Online',
+        createdBy: hasGroupon ? 'Reserva Web (Groupon)' : 'Reserva Web Online',
         createdAt: new Date().toISOString(),
-        notes: notesExtra ? `[RESERVA WEB] ${notesExtra}` : '[RESERVA WEB] Cita reservada online por el paciente'
+        notes: hasGroupon 
+          ? `[CUPÓN GROUPON: ${grouponCode}] ${notesExtra || 'Reserva online con cupón de Groupon'}`
+          : (notesExtra ? `[RESERVA WEB] ${notesExtra}` : '[RESERVA WEB] Cita reservada online por el paciente')
       };
 
       // Colocar la nueva cita al principio
@@ -1155,6 +1189,16 @@ const BookingApp = {
   async sendNotificationEmails(appt, doc, refCode) {
     const patientEmail = this.currentClient.email;
     const dateFormatted = this.formatDateDisplay(appt.date);
+    const isGroupon = appt.origin === 'groupon';
+    const isFree = !isGroupon && Number(appt.price) === 0;
+    const tarifaDisplay = isGroupon
+      ? `Cupón Groupon (${appt.grouponCode})`
+      : (isFree ? 'Gratuito (0 €)' : `${appt.price} €`);
+    const paymentNote = isGroupon
+      ? `Recuerda presentar tu cupón Groupon (<b>${appt.grouponCode}</b>) en recepción el día de tu cita.`
+      : (isFree
+        ? `Esta cita corresponde a una consulta de valoración o revisión gratuita (0 €).`
+        : `El importe se abonará directamente en recepción el día de tu cita en efectivo o tarjeta.`);
 
     // 1. Correo de confirmación al paciente
     if (patientEmail) {
@@ -1173,12 +1217,12 @@ const BookingApp = {
                 <tr><td style="padding:6px 0;color:#9ca3af;width:120px;">Tratamiento:</td><td style="font-weight:bold;color:#dfba73;">${appt.serviceName}</td></tr>
                 <tr><td style="padding:6px 0;color:#9ca3af;">Fecha y Hora:</td><td style="font-weight:bold;color:#fff;">${dateFormatted} a las ${appt.time} h</td></tr>
                 <tr><td style="padding:6px 0;color:#9ca3af;">Especialista:</td><td>${doc.name} (${doc.room})</td></tr>
-                <tr><td style="padding:6px 0;color:#9ca3af;">Tarifa Oficial:</td><td style="font-weight:bold;color:#dfba73;">${appt.price} €</td></tr>
+                <tr><td style="padding:6px 0;color:#9ca3af;">Tarifa:</td><td style="font-weight:bold;color:#dfba73;">${tarifaDisplay}</td></tr>
                 <tr><td style="padding:6px 0;color:#9ca3af;">Dirección:</td><td>Calle Venezuela, 38, Valencia 46007</td></tr>
               </table>
             </div>
 
-            <p style="font-size:13px;color:#9ca3af;line-height:1.5;">El importe se abonará directamente en recepción el día de tu cita en efectivo o tarjeta. Si necesitas cambiar tu turno, avísanos con al menos 24 horas de antelación llamando al <b>643 304 897</b>.</p>
+            <p style="font-size:13px;color:#9ca3af;line-height:1.5;">${paymentNote} Si necesitas cambiar tu turno, avísanos con al menos 24 horas de antelación llamando al <b>643 304 897</b>.</p>
             
             <div style="text-align:center;margin-top:24px;">
               <a href="https://maps.google.com/?q=Calle+Venezuela+38+Valencia+46007" style="display:inline-block;background:#c5a059;color:#08080a;padding:12px 24px;border-radius:24px;font-weight:bold;text-decoration:none;font-size:14px;">Cómo Llegar a la Clínica (Google Maps)</a>
@@ -1217,7 +1261,7 @@ const BookingApp = {
           <ul>
             <li><b>Localizador:</b> ${refCode}</li>
             <li><b>Paciente:</b> ${appt.clientName} (Tel: ${appt.clientPhone} • DNI: ${appt.clientDni})</li>
-            <li><b>Tratamiento:</b> ${appt.serviceName} (${appt.duration} min • ${appt.price} €)</li>
+            <li><b>Tratamiento:</b> ${appt.serviceName} (${appt.duration} min • ${tarifaDisplay})</li>
             <li><b>Fecha:</b> ${dateFormatted} a las ${appt.time} h</li>
             <li><b>Especialista asignado:</b> ${doc.name} (${doc.room})</li>
             <li><b>Notas:</b> ${appt.notes}</li>
