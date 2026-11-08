@@ -14,7 +14,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   
   <link rel="icon" type="image/png" href="img/logo_nymeria.jpg">
-  <link rel="stylesheet" href="reservar.css?v=1.0">
+  <link rel="stylesheet" href="reservar.css?v=2.0">
 </head>
 <body class="booking-portal">
 
@@ -150,8 +150,45 @@
               <div id="client-upcoming-list" class="upcoming-list"></div>
             </div>
 
+            <!-- ACCESO RÁPIDO CUPÓN GROUPON (PASO 1) -->
+            <div id="step1-groupon-box" class="groupon-portal-card">
+              <label class="groupon-toggle-header" for="step1-has-groupon">
+                <span class="groupon-toggle-left">
+                  <span class="groupon-icon-pill"><i data-lucide="ticket"></i></span>
+                  <span>
+                    <strong>¿Tienes un cupón comprado en Groupon?</strong>
+                    <small>Selecciona tu oferta de Groupon e introduce tu código para reservar tu hora directamente.</small>
+                  </span>
+                </span>
+                <input type="checkbox" id="step1-has-groupon" class="groupon-checkbox" onchange="BookingApp.toggleGrouponPanel(1)">
+              </label>
+
+              <div id="step1-groupon-fields" class="groupon-fields-body hidden">
+                <div class="groupon-form-grid">
+                  <div class="form-group">
+                    <label for="step1-groupon-offer"><i data-lucide="tag"></i> Oferta Groupon comprada *</label>
+                    <select id="step1-groupon-offer" class="portal-select groupon-input" onchange="BookingApp.onGrouponOfferSelect(1, this.value)">
+                      <option value="">-- Selecciona la oferta comprada en Groupon --</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="step1-groupon-code"><i data-lucide="hash"></i> Código de Cupón / Seguridad Groupon *</label>
+                    <input type="text" id="step1-groupon-code" class="portal-input groupon-input" placeholder="Ej: GRP-123456" oninput="BookingApp.onGrouponCodeInput(this.value)">
+                  </div>
+                </div>
+                <div id="step1-groupon-preview" class="groupon-offer-preview hidden"></div>
+                <div class="groupon-quick-actions">
+                  <button type="button" class="btn-portal btn-groupon" onclick="BookingApp.applyGrouponAndContinue(1)">
+                    <i data-lucide="calendar-check"></i>
+                    <span>Canjear Cupón y Elegir Horario</span>
+                    <i data-lucide="arrow-right"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div class="step-footer mt-4" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; padding-top:16px; border-top:1px solid var(--border-subtle);">
-              <span class="text-sm text-muted">¿Deseas programar una nueva visita o tratamiento?</span>
+              <span class="text-sm text-muted">¿Deseas explorar todos los tratamientos y tarifas habituales?</span>
               <button type="button" class="btn-portal btn-gold btn-large" onclick="BookingApp.goToStep(2)">
                 <i data-lucide="plus-circle"></i>
                 <span>Solicitar Nueva Cita</span>
@@ -276,6 +313,43 @@
           <span class="gold-badge"><i data-lucide="sparkles"></i> Paso 2 de 4</span>
           <h2>Selecciona tu Tratamiento</h2>
           <p>Explora nuestras especialidades clínicas con tarifas transparentes y tiempos exactos de consulta.</p>
+        </div>
+
+        <!-- CANJE DIRECTO DE CUPÓN GROUPON (PASO 2) -->
+        <div id="step2-groupon-box" class="groupon-portal-card step2-groupon-card">
+          <label class="groupon-toggle-header" for="step2-has-groupon">
+            <span class="groupon-toggle-left">
+              <span class="groupon-icon-pill"><i data-lucide="ticket"></i></span>
+              <span>
+                <strong>¿Tienes un cupón comprado en Groupon?</strong>
+                <small>Canjéalo aquí: elige la oferta comprada y tu código para aplicar el servicio y precio Groupon.</small>
+              </span>
+            </span>
+            <input type="checkbox" id="step2-has-groupon" class="groupon-checkbox" onchange="BookingApp.toggleGrouponPanel(2)">
+          </label>
+
+          <div id="step2-groupon-fields" class="groupon-fields-body hidden">
+            <div class="groupon-form-grid">
+              <div class="form-group">
+                <label for="step2-groupon-offer"><i data-lucide="tag"></i> Oferta Groupon comprada *</label>
+                <select id="step2-groupon-offer" class="portal-select groupon-input" onchange="BookingApp.onGrouponOfferSelect(2, this.value)">
+                  <option value="">-- Selecciona la oferta comprada en Groupon --</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="step2-groupon-code"><i data-lucide="hash"></i> Código de Cupón / Seguridad Groupon *</label>
+                <input type="text" id="step2-groupon-code" class="portal-input groupon-input" placeholder="Ej: GRP-123456" oninput="BookingApp.onGrouponCodeInput(this.value)">
+              </div>
+            </div>
+            <div id="step2-groupon-preview" class="groupon-offer-preview hidden"></div>
+            <div class="groupon-quick-actions">
+              <button type="button" class="btn-portal btn-groupon" onclick="BookingApp.applyGrouponAndContinue(2)">
+                <i data-lucide="calendar-check"></i>
+                <span>Aplicar Cupón y Elegir Horario</span>
+                <i data-lucide="arrow-right"></i>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- SEARCH AND FILTER CONTROLS -->
@@ -515,15 +589,26 @@
             </div>
 
             <!-- CUPÓN GROUPON ONLINE (OPCIONAL) -->
-            <div class="groupon-online-box" style="margin-top:14px;padding:12px 14px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.25);border-radius:10px;">
-              <label class="deposit-checkbox-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:0.88rem;color:#4ade80;font-weight:700;">
-                <input type="checkbox" id="online-has-groupon" onchange="BookingApp.toggleGrouponField()" style="width:18px;height:18px;accent-color:#22c55e;cursor:pointer;">
+            <div class="groupon-online-box">
+              <label class="deposit-checkbox-label groupon-step4-toggle" for="online-has-groupon">
+                <input type="checkbox" id="online-has-groupon" class="groupon-checkbox" onchange="BookingApp.toggleGrouponPanel(4)">
                 <span>¿Tienes un cupón comprado en Groupon?</span>
               </label>
-              <div id="online-groupon-field" style="display:none;margin-top:10px;">
-                <label for="online-groupon-code" style="font-size:0.8rem;color:#9ca3af;display:block;margin-bottom:4px;">Introduce tu Código de Cupón Groupon *</label>
-                <input type="text" id="online-groupon-code" class="portal-input" placeholder="Ej: GRP-12345 o Código de Seguridad" style="border-color:rgba(34,197,94,0.4);">
-                <small style="color:#9ca3af;font-size:0.75rem;display:block;margin-top:4px;">El equipo de recepción verificará tu cupón y no tendrás que abonar nada en recepción si ya está prepagado.</small>
+              <div id="online-groupon-field" class="hidden" style="margin-top:12px;">
+                <div class="groupon-form-grid">
+                  <div class="form-group">
+                    <label for="online-groupon-offer"><i data-lucide="tag"></i> Oferta Groupon comprada *</label>
+                    <select id="online-groupon-offer" class="portal-select groupon-input" onchange="BookingApp.onGrouponOfferSelect(4, this.value)">
+                      <option value="">-- Selecciona la oferta comprada en Groupon --</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="online-groupon-code"><i data-lucide="hash"></i> Código de Cupón / Seguridad Groupon *</label>
+                    <input type="text" id="online-groupon-code" class="portal-input groupon-input" placeholder="Ej: GRP-123456" oninput="BookingApp.onGrouponCodeInput(this.value)">
+                  </div>
+                </div>
+                <div id="online-groupon-preview" class="groupon-offer-preview hidden"></div>
+                <small class="groupon-helper-note">El equipo de recepción validará tu cupón al llegar. No abonarás tarifa habitual si tu oferta ya está prepagada en Groupon.</small>
               </div>
             </div>
 
@@ -643,6 +728,6 @@
   </div>
 
   <!-- SCRIPT -->
-  <script src="reservar.js?v=1.0"></script>
+  <script src="reservar.js?v=2.0"></script>
 </body>
 </html>

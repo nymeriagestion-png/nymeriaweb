@@ -29,7 +29,9 @@ const BookingApp = {
   backupData: null,
   clients: [],
   appointments: [],
+  allServices: [],
   services: [],
+  grouponOffers: [],
   professionals: [],
   defaultSchedules: {},
   blockedDates: [],
@@ -43,14 +45,22 @@ const BookingApp = {
   activeCategory: 'all',
   serviceSearchQuery: '',
 
+  // Estado cupón / campaña Groupon
+  hasGroupon: false,
+  selectedGrouponValue: '',
+  selectedGrouponOffer: null,
+  grouponCode: '',
+
   // Días laborables generados
   availableDays: [],
 
   async init() {
     this.initIcons();
     await this.loadClinicData();
+    this.populateGrouponOfferSelects();
     this.checkSavedSession();
     this.renderServicesCatalog();
+    this.syncGrouponUI();
   },
 
   initIcons() {
@@ -96,12 +106,16 @@ const BookingApp = {
       this.backupData = data;
       this.clients = Array.isArray(data.clients) ? data.clients : [];
       this.appointments = Array.isArray(data.appointments) ? data.appointments : [];
-      this.services = Array.isArray(data.services) ? data.services : [];
+      const rawServices = Array.isArray(data.services) ? data.services : [];
+      this.allServices = rawServices;
+      // En la web pública NUNCA se muestran servicios gratuitos (0 €) ni revisiones internas
+      this.services = rawServices.filter(s => s && Number(s.price) > 0 && !s.internalOnly);
+      this.grouponOffers = (Array.isArray(data.grouponOffers) ? data.grouponOffers : []).filter(o => o && o.active !== false);
       this.professionals = Array.isArray(data.professionals) ? data.professionals : [];
       this.defaultSchedules = data.defaultSchedules || {};
       this.blockedDates = Array.isArray(data.blockedDates) ? data.blockedDates : [];
 
-      console.log(`✓ Sincronizado: ${this.services.length} servicios, ${this.professionals.length} especialistas, ${this.clients.length} pacientes, ${this.appointments.length} citas.`);
+      console.log(`✓ Sincronizado: ${this.services.length} servicios visibles web, ${this.grouponOffers.length} ofertas Groupon activas, ${this.professionals.length} especialistas, ${this.clients.length} pacientes, ${this.appointments.length} citas.`);
       
       // Si el usuario ya estaba identificado, refrescar sus datos
       if (this.currentClient) {
@@ -125,9 +139,19 @@ const BookingApp = {
       return;
     }
     if (targetStep > 2 && !this.selectedService) {
-      this.showToast('Selecciona primero un tratamiento.', 'warning');
+      this.showToast('Selecciona primero un tratamiento o canjea tu cupón Groupon.', 'warning');
       this.switchStep(2);
       return;
+    }
+    if (targetStep > 2 && this.hasGroupon) {
+      if (this.grouponOffers.length > 0 && !this.selectedGrouponOffer) {
+        this.showToast('Selecciona la oferta de Groupon adquirida para continuar.', 'warning');
+        return;
+      }
+      if (!this.grouponCode || !this.grouponCode.trim()) {
+        this.showToast('Introduce tu código de cupón / seguridad de Groupon para continuar (o desmarca la casilla si no usas cupón).', 'warning');
+        return;
+      }
     }
     if (targetStep > 3 && (!this.selectedDate || !this.selectedSlot)) {
       this.showToast('Elige un día y una hora disponible.', 'warning');
@@ -140,6 +164,7 @@ const BookingApp = {
     // Acciones al entrar a cada paso
     if (targetStep === 2) {
       this.renderServicesCatalog();
+      this.syncGrouponUI();
     } else if (targetStep === 3) {
       this.setupStep3();
     } else if (targetStep === 4) {
@@ -322,10 +347,12 @@ const BookingApp = {
     const formLogin = document.getElementById('form-login');
     const loggedCard = document.getElementById('logged-user-card');
     const authTabs = document.getElementById('auth-tabs-container');
+    const panelLogin = document.getElementById('auth-tab-login');
     const panelRegister = document.getElementById('auth-tab-register');
 
     if (formLogin) formLogin.classList.add('hidden');
     if (panelRegister) panelRegister.classList.remove('active');
+    if (panelLogin) panelLogin.classList.add('active');
     if (authTabs) authTabs.classList.add('hidden');
     if (loggedCard) {
       loggedCard.classList.remove('hidden');
@@ -382,14 +409,22 @@ const BookingApp = {
       }
     }
 
+    this.populateGrouponOfferSelects();
+    this.syncGrouponUI();
     this.initIcons();
   },
 
   logoutClient() {
     this.currentClient = null;
+    this.selectedService = null;
+    this.selectedDate = null;
+    this.selectedSlot = null;
+    this.clearGrouponState();
     sessionStorage.removeItem('nymeria_web_patient');
 
     document.getElementById('nav-sub-client').textContent = 'Paciente';
+    document.getElementById('nav-sub-service').textContent = 'Seleccionar';
+    document.getElementById('nav-sub-slot').textContent = 'Hueco libre';
     const formLogin = document.getElementById('form-login');
     const loggedCard = document.getElementById('logged-user-card');
     const authTabs = document.getElementById('auth-tabs-container');
@@ -401,7 +436,365 @@ const BookingApp = {
     if (loggedCard) loggedCard.classList.add('hidden');
     if (authTabs) authTabs.classList.remove('hidden');
     this.switchAuthTab('login');
+    this.updateServiceBanner();
     this.initIcons();
+  },
+
+  // ========================================================================
+  // GESTIÓN DE OFERTAS Y CUPONES GROUPON (PASOS 1, 2 Y 4)
+  // ========================================================================
+  getEffectiveDuration() {
+    if (this.hasGroupon && this.selectedGrouponOffer && Number(this.selectedGrouponOffer.duration) > 0) {
+      return Number(this.selectedGrouponOffer.duration);
+    }
+    return this.selectedService ? (Number(this.selectedService.duration) || 45) : 45;
+  },
+
+  getEffectivePriceInfo() {
+    if (this.hasGroupon) {
+      if (this.selectedGrouponOffer) {
+        const isPrepago = this.selectedGrouponOffer.paymentType !== 'pago_clinica' || Number(this.selectedGrouponOffer.grouponPrice || 0) === 0;
+        return {
+          isGroupon: true,
+          paymentType: isPrepago ? 'prepago' : 'pago_clinica',
+          price: isPrepago ? 0 : Number(this.selectedGrouponOffer.grouponPrice || 0)
+        };
+      }
+      return { isGroupon: true, paymentType: 'prepago', price: 0 };
+    }
+    return {
+      isGroupon: false,
+      paymentType: null,
+      price: this.selectedService ? (Number(this.selectedService.price) || 0) : 0
+    };
+  },
+
+  resolveGrouponSelection(val) {
+    if (!val) return { offer: null, service: null };
+
+    if (String(val).startsWith('srv:')) {
+      const sid = String(val).slice(4);
+      const serv = this.services.find(s => String(s.id) === sid) || this.allServices.find(s => String(s.id) === sid) || null;
+      return { offer: null, service: serv };
+    }
+
+    const offer = this.grouponOffers.find(o => String(o.id) === String(val)) || null;
+    if (!offer) return { offer: null, service: null };
+
+    let serv = this.allServices.find(s => String(s.id) === String(offer.serviceId)) || null;
+    if (!serv) {
+      serv = {
+        id: offer.serviceId || ('serv-' + offer.id),
+        name: offer.serviceName || offer.title,
+        category: offer.category || 'medico',
+        duration: Number(offer.duration) || 45,
+        price: Number(offer.grouponPrice || 0),
+        description: offer.description || 'Tratamiento incluido en oferta promocional de Groupon.'
+      };
+    }
+    return { offer, service: serv };
+  },
+
+  populateGrouponOfferSelects() {
+    const ids = ['step1-groupon-offer', 'step2-groupon-offer', 'online-groupon-offer'];
+    ids.forEach(selId => {
+      const select = document.getElementById(selId);
+      if (!select) return;
+      select.innerHTML = '';
+
+      const defOpt = document.createElement('option');
+      defOpt.value = '';
+      defOpt.textContent = this.grouponOffers.length > 0
+        ? '-- Selecciona la oferta comprada en Groupon --'
+        : '-- Selecciona el tratamiento de tu cupón Groupon --';
+      select.appendChild(defOpt);
+
+      if (this.grouponOffers.length > 0) {
+        this.grouponOffers.forEach(o => {
+          const isPrepago = o.paymentType !== 'pago_clinica' || Number(o.grouponPrice || 0) === 0;
+          const priceTxt = isPrepago
+            ? '0 € en clínica (Prepago Groupon)'
+            : `${Number(o.grouponPrice).toFixed(2)} € en clínica`;
+          const opt = document.createElement('option');
+          opt.value = o.id;
+          opt.textContent = `${o.title} • ${o.duration || 45} min (${priceTxt})`;
+          select.appendChild(opt);
+        });
+      } else {
+        const grp = document.createElement('optgroup');
+        grp.label = 'Tratamientos disponibles en clínica';
+        this.services.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = `srv:${s.id}`;
+          opt.textContent = `${s.name} • ${s.duration || 45} min`;
+          grp.appendChild(opt);
+        });
+        select.appendChild(grp);
+      }
+
+      if (this.selectedGrouponValue && Array.from(select.options).some(o => o.value === this.selectedGrouponValue)) {
+        select.value = this.selectedGrouponValue;
+      }
+    });
+  },
+
+  clearGrouponState() {
+    this.hasGroupon = false;
+    this.selectedGrouponValue = '';
+    this.selectedGrouponOffer = null;
+    this.grouponCode = '';
+    this.syncGrouponUI();
+  },
+
+  syncGrouponUI() {
+    ['step1-has-groupon', 'step2-has-groupon', 'online-has-groupon'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.checked = this.hasGroupon;
+    });
+
+    const panel1 = document.getElementById('step1-groupon-fields');
+    const panel2 = document.getElementById('step2-groupon-fields');
+    const panel4 = document.getElementById('online-groupon-field');
+    if (panel1) panel1.classList.toggle('hidden', !this.hasGroupon);
+    if (panel2) panel2.classList.toggle('hidden', !this.hasGroupon);
+    if (panel4) panel4.classList.toggle('hidden', !this.hasGroupon);
+
+    ['step1-groupon-offer', 'step2-groupon-offer', 'online-groupon-offer'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.value = Array.from(el.options).some(o => o.value === this.selectedGrouponValue)
+          ? this.selectedGrouponValue
+          : '';
+      }
+    });
+
+    ['step1-groupon-code', 'step2-groupon-code', 'online-groupon-code'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && document.activeElement !== el && el.value !== (this.grouponCode || '')) {
+        el.value = this.grouponCode || '';
+      }
+    });
+
+    const { offer, service } = this.resolveGrouponSelection(this.selectedGrouponValue);
+    let previewHtml = '';
+    if (this.hasGroupon && service) {
+      const effDur = (offer && Number(offer.duration) > 0) ? Number(offer.duration) : (Number(service.duration) || 45);
+      const isPrepago = !offer || offer.paymentType !== 'pago_clinica' || Number(offer.grouponPrice || 0) === 0;
+      const priceBadge = isPrepago
+        ? '0,00 € en clínica (Ya pagado en Groupon)'
+        : `${Number(offer.grouponPrice).toFixed(2)} € a abonar en clínica`;
+      const offerHeading = offer ? offer.title : service.name;
+      const offerSub = offer
+        ? `Tratamiento incluido: <b>${service.name}</b>${offer.description ? ' • ' + offer.description : ''}`
+        : `Tratamiento seleccionado del catálogo (${service.duration || 45} min)`;
+
+      previewHtml = `
+        <div class="groupon-prev-left">
+          <strong>${offerHeading}</strong>
+          <span>${offerSub}</span>
+        </div>
+        <div class="groupon-prev-right">
+          <span class="groupon-price-badge">${priceBadge}</span>
+          <span class="groupon-dur-note"><i data-lucide="clock" style="width:11px;height:11px;display:inline;vertical-align:middle;"></i> Duración en agenda: ${effDur} min</span>
+        </div>
+      `;
+    }
+
+    ['step1-groupon-preview', 'step2-groupon-preview', 'online-groupon-preview'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (previewHtml) {
+        el.innerHTML = previewHtml;
+        el.classList.remove('hidden');
+      } else {
+        el.innerHTML = '';
+        el.classList.add('hidden');
+      }
+    });
+
+    this.initIcons();
+  },
+
+  toggleGrouponPanel(sourceStep) {
+    const chkId = sourceStep === 4 ? 'online-has-groupon' : `step${sourceStep}-has-groupon`;
+    const chk = document.getElementById(chkId);
+    const checked = Boolean(chk && chk.checked);
+    this.hasGroupon = checked;
+
+    if (checked) {
+      if (!this.selectedGrouponValue && this.selectedService) {
+        if (this.grouponOffers.length > 0) {
+          const match = this.grouponOffers.find(o => String(o.serviceId) === String(this.selectedService.id));
+          if (match) {
+            this.selectedGrouponValue = match.id;
+            this.selectedGrouponOffer = match;
+          }
+        } else {
+          this.selectedGrouponValue = `srv:${this.selectedService.id}`;
+          this.selectedGrouponOffer = null;
+        }
+      }
+      this.syncGrouponUI();
+      this.updateServiceBanner();
+      if (this.step === 4) this.renderSummary();
+
+      const focusTarget = this.selectedGrouponValue
+        ? (sourceStep === 4 ? 'online-groupon-code' : `step${sourceStep}-groupon-code`)
+        : (sourceStep === 4 ? 'online-groupon-offer' : `step${sourceStep}-groupon-offer`);
+      document.getElementById(focusTarget)?.focus();
+    } else {
+      this.selectedGrouponValue = '';
+      this.selectedGrouponOffer = null;
+      this.grouponCode = '';
+      this.syncGrouponUI();
+      this.updateServiceBanner();
+      if (this.step === 4) this.renderSummary();
+    }
+  },
+
+  onGrouponOfferSelect(sourceStep, val) {
+    this.hasGroupon = true;
+    this.selectedGrouponValue = val || '';
+
+    const { offer, service } = this.resolveGrouponSelection(val);
+    if (val && service) {
+      const prevServiceId = this.selectedService ? this.selectedService.id : null;
+      const prevCategory = this.selectedService ? this.selectedService.category : null;
+      const prevDur = this.getEffectiveDuration();
+
+      this.selectedGrouponOffer = offer;
+      this.selectedService = service;
+      const newDur = this.getEffectiveDuration();
+
+      if (this.selectedSlot && (prevCategory !== service.category || prevDur !== newDur)) {
+        this.selectedDate = null;
+        this.selectedSlot = null;
+        const navSlot = document.getElementById('nav-sub-slot');
+        if (navSlot) navSlot.textContent = 'Hueco libre';
+
+        if (sourceStep === 4) {
+          this.syncGrouponUI();
+          this.updateServiceBanner();
+          this.renderServicesCatalog();
+          this.showToast('La oferta Groupon elegida tiene otra duración o especialidad. Selecciona tu nuevo horario disponible.');
+          this.goToStep(3);
+          return;
+        }
+      } else if (prevServiceId !== service.id || prevDur !== newDur) {
+        this.selectedDate = null;
+        this.selectedSlot = null;
+        const navSlot = document.getElementById('nav-sub-slot');
+        if (navSlot) navSlot.textContent = 'Hueco libre';
+      }
+
+      this.updateServiceBanner();
+      this.renderServicesCatalog();
+    } else {
+      this.selectedGrouponOffer = null;
+    }
+
+    this.syncGrouponUI();
+    if (this.step === 4) {
+      this.renderSummary();
+    }
+  },
+
+  onGrouponCodeInput(val) {
+    this.grouponCode = (val || '').trimStart();
+    ['step1-groupon-code', 'step2-groupon-code', 'online-groupon-code'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && document.activeElement !== el && el.value !== (val || '')) {
+        el.value = val || '';
+      }
+    });
+  },
+
+  applyGrouponAndContinue(sourceStep) {
+    if (!this.currentClient) {
+      this.showToast('Identifícate primero en el Paso 1 para continuar.');
+      return;
+    }
+
+    const offerEl = document.getElementById(`step${sourceStep}-groupon-offer`);
+    const codeEl = document.getElementById(`step${sourceStep}-groupon-code`);
+    const offerVal = offerEl ? offerEl.value : this.selectedGrouponValue;
+    const code = codeEl ? codeEl.value.trim() : this.grouponCode.trim();
+
+    if (!offerVal) {
+      alert('Por favor selecciona la oferta de Groupon que has comprado.');
+      offerEl?.focus();
+      return;
+    }
+
+    const { offer, service } = this.resolveGrouponSelection(offerVal);
+    if (!service) {
+      alert('No se pudo vincular el tratamiento de esta oferta.');
+      return;
+    }
+
+    if (!code) {
+      alert('Por favor introduce tu código de cupón o código de seguridad de Groupon.');
+      codeEl?.focus();
+      return;
+    }
+
+    this.hasGroupon = true;
+    this.grouponCode = code;
+    this.selectedGrouponValue = offerVal;
+    this.selectedGrouponOffer = offer;
+
+    const prevId = this.selectedService ? this.selectedService.id : null;
+    const prevDur = this.getEffectiveDuration();
+    this.selectedService = service;
+    const newDur = this.getEffectiveDuration();
+    if (prevId !== service.id || prevDur !== newDur) {
+      this.selectedDate = null;
+      this.selectedSlot = null;
+      const navSlot = document.getElementById('nav-sub-slot');
+      if (navSlot) navSlot.textContent = 'Hueco libre';
+    }
+
+    this.syncGrouponUI();
+    this.updateServiceBanner();
+    this.goToStep(3);
+  },
+
+  updateServiceBanner() {
+    const navSub = document.getElementById('nav-sub-service');
+    const banner = document.getElementById('selected-service-banner');
+    const bannerName = document.getElementById('banner-serv-name');
+    const bannerMeta = document.getElementById('banner-serv-meta');
+    const btnNext = document.getElementById('btn-next-step2');
+
+    if (!this.selectedService) {
+      if (navSub) navSub.textContent = 'Seleccionar';
+      if (banner) banner.classList.add('hidden');
+      if (btnNext) btnNext.disabled = true;
+      return;
+    }
+
+    const effDur = this.getEffectiveDuration();
+    const priceInfo = this.getEffectivePriceInfo();
+    const displayLabel = (this.hasGroupon && this.selectedGrouponOffer)
+      ? `${this.selectedGrouponOffer.title} (${this.selectedService.name})`
+      : this.selectedService.name;
+
+    if (navSub) {
+      navSub.textContent = displayLabel.length > 18 ? `${displayLabel.substring(0, 16)}...` : displayLabel;
+    }
+
+    if (banner) {
+      banner.classList.remove('hidden');
+      if (bannerName) bannerName.textContent = displayLabel;
+      if (bannerMeta) {
+        const priceTxt = priceInfo.isGroupon
+          ? (priceInfo.price === 0 ? '0 € (Prepago Groupon)' : `${priceInfo.price.toFixed(2)} € (Oferta Groupon)`)
+          : `Tarifa Oficial: ${Number(this.selectedService.price).toFixed(0)} €`;
+        bannerMeta.textContent = `${effDur} min • ${priceTxt}`;
+      }
+    }
+
+    if (btnNext) btnNext.disabled = false;
   },
 
   checkSavedSession() {
@@ -461,7 +854,7 @@ const BookingApp = {
     const grid = document.getElementById('services-grid');
     if (!grid) return;
 
-    let filtered = this.services;
+    let filtered = this.services.filter(s => s && Number(s.price) > 0 && !s.internalOnly);
 
     // Filtro por categoría
     if (this.activeCategory !== 'all') {
@@ -498,7 +891,7 @@ const BookingApp = {
     };
 
     grid.innerHTML = filtered.map(s => {
-      const isSelected = this.selectedService && this.selectedService.id === s.id;
+      const isSelected = !this.hasGroupon && this.selectedService && this.selectedService.id === s.id;
       const catLabel = catLabels[s.category] || s.category;
       return `
         <div class="service-card ${isSelected ? 'selected' : ''}" onclick="BookingApp.chooseService('${s.id}')">
@@ -511,7 +904,7 @@ const BookingApp = {
             <p class="sc-desc">${s.description || 'Consulta clínica de diagnóstico y aplicación del procedimiento médico-estético.'}</p>
           </div>
           <div class="sc-bottom">
-            <span class="sc-price">${Number(s.price) === 0 ? 'Gratuito' : Number(s.price).toFixed(0) + ' €'}</span>
+            <span class="sc-price">${Number(s.price).toFixed(0)} €</span>
             <button type="button" class="btn-select-serv">
               ${isSelected ? '✓ Seleccionado' : 'Seleccionar'}
             </button>
@@ -527,24 +920,22 @@ const BookingApp = {
     const serv = this.services.find(s => s.id === serviceId);
     if (!serv) return;
 
+    const prevId = this.selectedService ? this.selectedService.id : null;
+    const prevWasGroupon = this.hasGroupon;
+    const prevDur = this.getEffectiveDuration();
+
+    // Elegir un tratamiento del catálogo general vuelve a Tarifa Habitual
+    this.clearGrouponState();
     this.selectedService = serv;
 
-    // Actualizar nav stepper
-    document.getElementById('nav-sub-service').textContent = `${serv.name.substring(0, 16)}...`;
-
-    // Actualizar banner flotante
-    const banner = document.getElementById('selected-service-banner');
-    if (banner) {
-      banner.classList.remove('hidden');
-      document.getElementById('banner-serv-name').textContent = serv.name;
-      document.getElementById('banner-serv-meta').textContent = `${serv.duration} min • Tarifa Oficial: ${Number(serv.price) === 0 ? 'Gratuito (0 €)' : serv.price + ' €'}`;
+    if (prevId !== serv.id || prevWasGroupon || prevDur !== Number(serv.duration)) {
+      this.selectedDate = null;
+      this.selectedSlot = null;
+      const navSlot = document.getElementById('nav-sub-slot');
+      if (navSlot) navSlot.textContent = 'Hueco libre';
     }
 
-    // Habilitar botón de continuar
-    const btnNext = document.getElementById('btn-next-step2');
-    if (btnNext) btnNext.disabled = false;
-
-    // Re-renderizar catálogo para iluminar la tarjeta
+    this.updateServiceBanner();
     this.renderServicesCatalog();
   },
 
@@ -742,8 +1133,12 @@ const BookingApp = {
     }
 
     // Actualizar etiqueta del día
+    const effDur = this.getEffectiveDuration();
+    const displayLabel = (this.hasGroupon && this.selectedGrouponOffer)
+      ? this.selectedGrouponOffer.title
+      : this.selectedService.name;
     document.getElementById('cur-day-display').textContent = this.formatDateDisplay(dateStr);
-    document.getElementById('slots-duration-hint').textContent = `Franjas de ${this.selectedService.duration} min adaptadas a "${this.selectedService.name}"`;
+    document.getElementById('slots-duration-hint').textContent = `Franjas de ${effDur} min adaptadas a "${displayLabel}"`;
 
     // Deshabilitar botón de continuar hasta que elija hora
     const btnNext = document.getElementById('btn-next-step3');
@@ -759,7 +1154,7 @@ const BookingApp = {
       return { freeCount: 0, morning: [], afternoon: [] };
     }
 
-    const duration = Number(this.selectedService.duration) || 45;
+    const duration = this.getEffectiveDuration();
     const dateObj = new Date(dateStr + 'T00:00:00');
     const dayOfWeek = dateObj.getDay();
 
@@ -942,11 +1337,25 @@ const BookingApp = {
     }
 
     const doc = this.selectedSlot.doctor || this.professionals[0];
+    const effDur = this.getEffectiveDuration();
+    const priceInfo = this.getEffectivePriceInfo();
+    const grpOffer = priceInfo.isGroupon ? this.selectedGrouponOffer : null;
 
-    document.getElementById('sum-serv-name').textContent = this.selectedService.name;
-    document.getElementById('sum-serv-desc').textContent = this.selectedService.description || 'Consulta médica y tratamiento en cabina clínica.';
-    document.getElementById('sum-serv-price').textContent = Number(this.selectedService.price) === 0 ? 'Gratuito (0 €)' : `${Number(this.selectedService.price).toFixed(0)} €`;
-    document.getElementById('sum-serv-dur').textContent = `${this.selectedService.duration} min`;
+    document.getElementById('sum-serv-name').textContent = grpOffer
+      ? `${grpOffer.title} (${this.selectedService.name})`
+      : this.selectedService.name;
+    document.getElementById('sum-serv-desc').textContent = (grpOffer && grpOffer.description)
+      ? grpOffer.description
+      : (this.selectedService.description || 'Consulta médica y tratamiento en cabina clínica.');
+
+    if (priceInfo.isGroupon) {
+      document.getElementById('sum-serv-price').textContent = priceInfo.price === 0
+        ? '0 € (Prepago Groupon)'
+        : `${priceInfo.price.toFixed(2)} € (Oferta Groupon)`;
+    } else {
+      document.getElementById('sum-serv-price').textContent = `${Number(this.selectedService.price).toFixed(0)} €`;
+    }
+    document.getElementById('sum-serv-dur').textContent = `${effDur} min`;
 
     document.getElementById('sum-doc-name').textContent = doc.name;
     document.getElementById('sum-doc-room').textContent = `${doc.roleTitle || 'Especialista'} • ${doc.room}`;
@@ -958,26 +1367,23 @@ const BookingApp = {
     document.getElementById('sum-client-dni').textContent = this.currentClient.dni;
     document.getElementById('sum-client-email').textContent = this.currentClient.email;
 
+    const policyDiv = document.querySelector('#step-4 .policy-notice > div');
+    if (policyDiv) {
+      if (priceInfo.isGroupon) {
+        policyDiv.innerHTML = priceInfo.price === 0
+          ? `<b>Canje de Cupón Groupon y Política de Cancelación:</b><br>Tu oferta ya está prepagada en Groupon (0 € adicionales por el servicio). Presenta tu código en recepción al llegar. Si necesitas modificar tu turno, avísanos con al menos 24 horas de antelación.`
+          : `<b>Canje de Cupón Groupon (${priceInfo.price.toFixed(2)} € en clínica) y Cancelación:</b><br>Presenta tu código de cupón en recepción el día de tu cita y abona el importe promocional acordado (${priceInfo.price.toFixed(2)} € en efectivo o tarjeta). Avísanos con 24h de antelación si necesitas cambiar el turno.`;
+      } else {
+        policyDiv.innerHTML = `<b>Pago en Clínica y Política de Cancelación:</b><br>El importe se abonará directamente en recepción el día de tu cita (efectivo o tarjeta). Si necesitas modificar o anular tu turno, te rogamos nos avises con al menos 24 horas de antelación para ceder el hueco a otro paciente.`;
+      }
+    }
+
+    this.syncGrouponUI();
     this.initIcons();
   },
 
   toggleGrouponField() {
-    const chk = document.getElementById('online-has-groupon');
-    const field = document.getElementById('online-groupon-field');
-    const sumPrice = document.getElementById('sum-serv-price');
-    if (chk && field) {
-      field.style.display = chk.checked ? 'block' : 'none';
-      if (sumPrice && this.selectedService) {
-        if (chk.checked) {
-          sumPrice.textContent = 'Cupón Groupon';
-        } else {
-          sumPrice.textContent = Number(this.selectedService.price) === 0 ? 'Gratuito (0 €)' : `${Number(this.selectedService.price).toFixed(0)} €`;
-        }
-      }
-      if (chk.checked) {
-        document.getElementById('online-groupon-code')?.focus();
-      }
-    }
+    this.toggleGrouponPanel(4);
   },
 
   // ========================================================================
@@ -985,8 +1391,16 @@ const BookingApp = {
   // ========================================================================
   async submitBooking() {
     const btn = document.getElementById('btn-confirm-booking');
-    const hasGroupon = document.getElementById('online-has-groupon')?.checked;
-    const grouponCode = hasGroupon ? (document.getElementById('online-groupon-code')?.value.trim() || '') : '';
+    const hasGroupon = Boolean(document.getElementById('online-has-groupon')?.checked || this.hasGroupon);
+    this.hasGroupon = hasGroupon;
+    const grouponCode = hasGroupon ? (document.getElementById('online-groupon-code')?.value.trim() || this.grouponCode.trim()) : '';
+    this.grouponCode = grouponCode;
+
+    if (hasGroupon && this.grouponOffers.length > 0 && !this.selectedGrouponOffer) {
+      alert('Por favor selecciona la oferta de Groupon que has comprado antes de confirmar la cita.');
+      document.getElementById('online-groupon-offer')?.focus();
+      return;
+    }
 
     if (hasGroupon && !grouponCode) {
       alert('Por favor introduce tu Código de Cupón de Groupon antes de confirmar la cita.');
@@ -1002,6 +1416,9 @@ const BookingApp = {
 
     const notesExtra = document.getElementById('booking-final-notes')?.value.trim() || '';
     const doc = this.selectedSlot.doctor || this.professionals[0];
+    const effDur = this.getEffectiveDuration();
+    const priceInfo = this.getEffectivePriceInfo();
+    const grpOffer = hasGroupon ? this.selectedGrouponOffer : null;
 
     try {
       // 1. Obtener los datos más frescos de GitHub junto con el SHA actual
@@ -1085,20 +1502,22 @@ const BookingApp = {
         serviceName: this.selectedService.name,
         date: this.selectedDate,
         time: this.selectedSlot.time,
-        duration: Number(this.selectedService.duration) || 45,
-        price: hasGroupon ? 0 : (Number(this.selectedService.price) || 0),
+        duration: effDur,
+        price: priceInfo.price,
         originalPrice: Number(this.selectedService.price) || 0,
         origin: hasGroupon ? 'groupon' : 'habitual',
+        grouponOfferId: grpOffer ? grpOffer.id : '',
+        grouponOfferTitle: grpOffer ? grpOffer.title : '',
         grouponCode: hasGroupon ? grouponCode : '',
-        grouponPaymentType: hasGroupon ? 'prepago' : null,
+        grouponPaymentType: hasGroupon ? priceInfo.paymentType : null,
         deposit: 0,
         depositMethod: null,
         status: 'Pendiente', // Cita pendiente de confirmación en recepción
         isOnline: true,
         createdBy: hasGroupon ? 'Reserva Web (Groupon)' : 'Reserva Web Online',
         createdAt: new Date().toISOString(),
-        notes: hasGroupon 
-          ? `[CUPÓN GROUPON: ${grouponCode}] ${notesExtra || 'Reserva online con cupón de Groupon'}`
+        notes: hasGroupon
+          ? `[CUPÓN GROUPON: ${grouponCode}${grpOffer ? ' • ' + grpOffer.title : ''}] ${notesExtra || 'Reserva online con cupón de Groupon'}`
           : (notesExtra ? `[RESERVA WEB] ${notesExtra}` : '[RESERVA WEB] Cita reservada online por el paciente')
       };
 
@@ -1118,7 +1537,7 @@ const BookingApp = {
 
       const commitMessage = `web: cita online ${refCode} - ${this.currentClient.name} (${this.selectedService.name} el ${this.selectedDate} a las ${this.selectedSlot.time})`;
 
-      const putRes = await fetch(BookingConfig.apiUrl, {
+      let putRes = await fetch(BookingConfig.apiUrl, {
         method: 'PUT',
         headers: {
           'Authorization': `token ${BookingConfig.githubToken}`,
@@ -1147,7 +1566,7 @@ const BookingApp = {
           const listRetry = await retryDir.json();
           const fRetry = Array.isArray(listRetry) ? listRetry.find(x => x.name === 'backup.json') : null;
           if (fRetry) {
-            await fetch(BookingConfig.apiUrl, {
+            putRes = await fetch(BookingConfig.apiUrl, {
               method: 'PUT',
               headers: {
                 'Authorization': `token ${BookingConfig.githubToken}`,
@@ -1163,6 +1582,16 @@ const BookingApp = {
           }
         }
       }
+
+      if (!putRes.ok) {
+        const errInfo = await putRes.json().catch(() => ({}));
+        throw new Error(errInfo.message || `Error HTTP ${putRes.status}`);
+      }
+
+      this.backupData = freshData;
+      this.clients = freshData.clients;
+      this.appointments = freshData.appointments;
+      if (this.currentClient) this.currentClient.isNewWebClient = false;
 
       console.log('✓ Cita sincronizada con éxito en GitHub');
 
@@ -1191,14 +1620,17 @@ const BookingApp = {
     const dateFormatted = this.formatDateDisplay(appt.date);
     const isGroupon = appt.origin === 'groupon';
     const isFree = !isGroupon && Number(appt.price) === 0;
+    const grpTitleTxt = appt.grouponOfferTitle ? `${appt.grouponOfferTitle} • ` : '';
     const tarifaDisplay = isGroupon
-      ? `Cupón Groupon (${appt.grouponCode})`
-      : (isFree ? 'Gratuito (0 €)' : `${appt.price} €`);
+      ? (Number(appt.price || 0) === 0
+        ? `Cupón Groupon Prepago (${grpTitleTxt}Código: ${appt.grouponCode}) • 0,00 € en clínica`
+        : `Oferta Groupon: ${Number(appt.price).toFixed(2)} € (${grpTitleTxt}Código: ${appt.grouponCode})`)
+      : (isFree ? 'Gratuito (0 €)' : `${Number(appt.price).toFixed(2)} €`);
     const paymentNote = isGroupon
-      ? `Recuerda presentar tu cupón Groupon (<b>${appt.grouponCode}</b>) en recepción el día de tu cita.`
-      : (isFree
-        ? `Esta cita corresponde a una consulta de valoración o revisión gratuita (0 €).`
-        : `El importe se abonará directamente en recepción el día de tu cita en efectivo o tarjeta.`);
+      ? (Number(appt.price || 0) === 0
+        ? `Recuerda presentar tu cupón Groupon (<b>${appt.grouponCode}</b>) en recepción el día de tu cita. No tendrás que abonar importe adicional por esta oferta prepagada.`
+        : `Recuerda presentar tu cupón Groupon (<b>${appt.grouponCode}</b>) en recepción y abonar el importe promocional acordado (<b>${Number(appt.price).toFixed(2)} €</b>).`)
+      : `El importe se abonará directamente en recepción el día de tu cita en efectivo o tarjeta.`;
 
     // 1. Correo de confirmación al paciente
     if (patientEmail) {
@@ -1295,7 +1727,9 @@ const BookingApp = {
     this.switchStep(5);
 
     document.getElementById('success-ref-code').textContent = refCode;
-    document.getElementById('success-service-name').textContent = appt.serviceName;
+    document.getElementById('success-service-name').textContent = appt.grouponOfferTitle
+      ? `${appt.grouponOfferTitle} (${appt.serviceName})`
+      : appt.serviceName;
     document.getElementById('success-date-time').textContent = `${this.formatDateDisplay(appt.date)} a las ${appt.time} h`;
     document.getElementById('success-doctor-name').textContent = `${doc.name} (${doc.room})`;
     document.getElementById('success-client-name').textContent = `${appt.clientName} (${appt.clientPhone})`;
@@ -1332,6 +1766,19 @@ const BookingApp = {
     this.selectedService = null;
     this.selectedDate = null;
     this.selectedSlot = null;
+    this.clearGrouponState();
+
+    const notesEl = document.getElementById('booking-final-notes');
+    if (notesEl) notesEl.value = '';
+    const navSlot = document.getElementById('nav-sub-slot');
+    if (navSlot) navSlot.textContent = 'Hueco libre';
+    const btnConfirm = document.getElementById('btn-confirm-booking');
+    if (btnConfirm) {
+      btnConfirm.disabled = false;
+      btnConfirm.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Confirmar Mi Reserva Online</span>`;
+    }
+
+    this.updateServiceBanner();
     this.goToStep(2);
   },
 

@@ -1691,8 +1691,177 @@ html, body {
   margin-bottom: 10px;
 }
 
+/* Groupon Portal Card (Steps 1, 2 & 4) */
+.groupon-portal-card {
+  margin-top: 18px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.09), rgba(16, 185, 129, 0.03));
+  border: 1.5px solid rgba(34, 197, 94, 0.35);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  transition: var(--transition);
+}
+.groupon-portal-card.step2-groupon-card {
+  margin-top: 0;
+  margin-bottom: 18px;
+}
+.groupon-portal-card:hover {
+  border-color: rgba(74, 222, 128, 0.65);
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.12);
+}
+.groupon-toggle-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+}
+.groupon-toggle-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+.groupon-toggle-left strong {
+  display: block;
+  font-size: 0.94rem;
+  color: #4ade80;
+  line-height: 1.25;
+}
+.groupon-toggle-left small {
+  display: block;
+  font-size: 0.77rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.groupon-icon-pill {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.16);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.groupon-icon-pill i {
+  width: 19px;
+  height: 19px;
+}
+.groupon-checkbox {
+  width: 20px;
+  height: 20px;
+  accent-color: #22c55e;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.groupon-fields-body {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(34, 197, 94, 0.25);
+}
+.groupon-form-grid {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 14px;
+}
+.groupon-input {
+  border-color: rgba(34, 197, 94, 0.35) !important;
+}
+.groupon-input:focus {
+  border-color: #4ade80 !important;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18) !important;
+}
+.groupon-offer-preview {
+  margin-top: 12px;
+  padding: 11px 14px;
+  background: rgba(8, 12, 10, 0.65);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.groupon-prev-left strong {
+  display: block;
+  font-size: 0.9rem;
+  color: #fff;
+}
+.groupon-prev-left span {
+  display: block;
+  font-size: 0.77rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.groupon-prev-right {
+  text-align: right;
+}
+.groupon-price-badge {
+  display: inline-block;
+  background: rgba(34, 197, 94, 0.16);
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  color: #4ade80;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.groupon-dur-note {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+.groupon-quick-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+.btn-portal.btn-groupon {
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+  color: #05140b;
+  font-weight: 700;
+  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.25);
+}
+.btn-portal.btn-groupon:hover:not(:disabled) {
+  background: linear-gradient(135deg, #22c55e, #4ade80);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(34, 197, 94, 0.35);
+}
+.groupon-online-box {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: var(--radius-md);
+}
+.groupon-step4-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #4ade80;
+  font-weight: 700;
+}
+.groupon-helper-note {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  display: block;
+  margin-top: 8px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
+  .groupon-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .groupon-quick-actions .btn-groupon {
+    width: 100%;
+  }
   .header-inner {
     padding: 12px 16px;
   }
