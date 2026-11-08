@@ -443,13 +443,36 @@ const BookingApp = {
   // ========================================================================
   // GESTIÓN DE OFERTAS Y CUPONES GROUPON (PASOS 1, 2 Y 4)
   // ========================================================================
+  getGrouponOfferParts(offer) {
+    if (!offer) return { customTitle: '', internalName: '', displayTitle: '', isPack: false, packList: [] };
+    const packList = (Array.isArray(offer.services) && offer.services.length > 0) ? offer.services : [];
+    const isPack = Boolean(offer.isPack || packList.length > 1);
+    const linkedServ = (this.allServices || []).find(s => String(s.id) === String(offer.serviceId)) || null;
+    const internalName = (
+      offer.serviceName ||
+      (packList.length > 0 ? packList.map(x => x.name).join(' + ') : '') ||
+      (linkedServ ? linkedServ.name : '') ||
+      offer.title ||
+      ''
+    ).trim();
+    const rawCustom = (
+      offer.customTitle ||
+      (offer.title && offer.title.trim() !== internalName ? offer.title : '') ||
+      ''
+    ).trim();
+    const customTitle = (rawCustom && rawCustom !== internalName) ? rawCustom : '';
+    const displayTitle = customTitle || internalName || 'Oferta Groupon';
+    return { customTitle, internalName, displayTitle, isPack, packList };
+  },
+
   formatGrouponDisplayLabel(offer, serviceName) {
-    const baseName = serviceName || (offer && (offer.serviceName || offer.title)) || '';
-    const offerTitle = offer && offer.title ? offer.title.trim() : '';
-    if (offerTitle && baseName && offerTitle !== baseName) {
-      return `${offerTitle} (${baseName})`;
+    if (!offer) return serviceName || '';
+    const { customTitle, internalName, displayTitle } = this.getGrouponOfferParts(offer);
+    const baseName = serviceName || internalName;
+    if (customTitle && baseName && customTitle !== baseName) {
+      return `${customTitle} (${baseName})`;
     }
-    return baseName || offerTitle;
+    return baseName || displayTitle;
   },
 
   getEffectiveDuration() {
@@ -557,14 +580,15 @@ const BookingApp = {
           const priceTxt = isPrepago
             ? '0 € en clínica (Prepago Groupon)'
             : `${Number(o.grouponPrice).toFixed(2)} € en clínica`;
-          const packList = (Array.isArray(o.services) && o.services.length > 0) ? o.services : null;
-          const isPack = Boolean(o.isPack || (packList && packList.length > 1));
-          const baseName = o.serviceName || (packList ? packList.map(x => x.name).join(' + ') : '') || o.title || 'Oferta Groupon';
+          const { customTitle, internalName, displayTitle, isPack, packList } = this.getGrouponOfferParts(o);
           const packTag = isPack ? `Pack (${packList.length}): ` : '';
+          const labelCore = customTitle
+            ? `${customTitle} — [${packTag || 'Incluye: '}${internalName}]`
+            : `${packTag}${displayTitle}`;
           const shortDesc = o.description ? ` (${o.description.length > 35 ? o.description.substring(0, 35) + '...' : o.description})` : '';
           const opt = document.createElement('option');
           opt.value = o.id;
-          opt.textContent = `${packTag}${baseName}${shortDesc} • ${o.duration || 45} min (${priceTxt})`;
+          opt.textContent = `${labelCore}${shortDesc} • ${o.duration || 45} min (${priceTxt})`;
           select.appendChild(opt);
         });
       } else {
@@ -630,16 +654,25 @@ const BookingApp = {
       const priceBadge = isPrepago
         ? '0,00 € en clínica (Ya pagado en Groupon)'
         : `${Number(offer.grouponPrice).toFixed(2)} € a abonar en clínica`;
-      const offerHeading = offer ? (offer.serviceName || offer.title || service.name) : service.name;
-      const isPack = Boolean(service.isPack || (offer && (offer.isPack || (Array.isArray(offer.services) && offer.services.length > 1))));
-      const customAliasDiffers = offer && offer.title && offer.title !== service.name;
+      const esc = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const parts = offer ? this.getGrouponOfferParts(offer) : null;
+      const offerHeading = esc(parts ? parts.displayTitle : service.name);
+      const safeServName = esc(service.name);
+      const isPack = Boolean(service.isPack || (parts && parts.isPack));
+      const hasCustomAlias = Boolean(parts && parts.customTitle && parts.customTitle !== service.name);
+      const descTxt = offer && offer.description ? ` • ${esc(offer.description)}` : '';
+      const habitualTxt = Number(service.price) > 0
+        ? ` • Tarifa habitual${isPack ? ' conjunta' : ''}: ${Number(service.price).toFixed(0)} €`
+        : '';
       const offerSub = offer
         ? (isPack
-            ? `🎁 Pack de ${service.packItems ? service.packItems.length : offer.services.length} tratamientos${offer.description ? ' • ' + offer.description : ''}${Number(service.price) > 0 ? ` • Tarifa habitual conjunta: ${Number(service.price).toFixed(0)} €` : ''}`
-            : (customAliasDiffers
-                ? `Tratamiento incluido: <b>${service.name}</b>${offer.description ? ' • ' + offer.description : ''}`
+            ? (hasCustomAlias
+                ? `🎁 <b>Incluye (Pack de ${service.packItems ? service.packItems.length : offer.services.length}):</b> ${safeServName}${descTxt}${habitualTxt}`
+                : `🎁 Pack de ${service.packItems ? service.packItems.length : offer.services.length} tratamientos${descTxt}${habitualTxt}`)
+            : (hasCustomAlias
+                ? `<b>Tratamiento incluido en clínica:</b> ${safeServName}${descTxt}${habitualTxt}`
                 : (offer.description
-                    ? `${offer.description}${Number(service.price) > 0 ? ` • Tarifa habitual: ${Number(service.price).toFixed(0)} €` : ''}`
+                    ? `${esc(offer.description)}${habitualTxt}`
                     : `Tratamiento oficial con tu cupón${Number(service.price) > 0 ? ` (tarifa habitual: ${Number(service.price).toFixed(0)} €)` : ''}`)))
         : `Tratamiento seleccionado del catálogo (${service.duration || 45} min)`;
 
@@ -679,7 +712,8 @@ const BookingApp = {
     if (checked) {
       if (!this.selectedGrouponValue && this.selectedService) {
         if (this.grouponOffers.length > 0) {
-          const match = this.grouponOffers.find(o => String(o.serviceId) === String(this.selectedService.id));
+          const match = this.grouponOffers.find(o => !o.isPack && String(o.serviceId) === String(this.selectedService.id))
+            || this.grouponOffers.find(o => String(o.serviceId) === String(this.selectedService.id));
           if (match) {
             this.selectedGrouponValue = match.id;
             this.selectedGrouponOffer = match;
@@ -1558,6 +1592,7 @@ const BookingApp = {
       const packServices = isPack
         ? (this.selectedService.packItems || (grpOffer ? grpOffer.services : undefined))
         : undefined;
+      const grpOfferLabel = grpOffer ? this.getGrouponOfferParts(grpOffer).displayTitle : '';
 
       const newAppointment = {
         id: appointmentId,
@@ -1579,7 +1614,7 @@ const BookingApp = {
         isPack: isPack,
         packServices: packServices,
         grouponOfferId: grpOffer ? grpOffer.id : '',
-        grouponOfferTitle: grpOffer ? (grpOffer.serviceName || grpOffer.title) : '',
+        grouponOfferTitle: grpOfferLabel,
         grouponCode: hasGroupon ? grouponCode : '',
         grouponPaymentType: hasGroupon ? priceInfo.paymentType : null,
         deposit: 0,
@@ -1589,7 +1624,7 @@ const BookingApp = {
         createdBy: hasGroupon ? 'Reserva Web (Groupon)' : 'Reserva Web Online',
         createdAt: new Date().toISOString(),
         notes: hasGroupon
-          ? `[CUPÓN GROUPON: ${grouponCode}${grpOffer ? ' • ' + (grpOffer.serviceName || grpOffer.title) : ''}] ${notesExtra || 'Reserva online con cupón de Groupon'}`
+          ? `[CUPÓN GROUPON: ${grouponCode}${grpOfferLabel ? ' • ' + grpOfferLabel : ''}] ${notesExtra || 'Reserva online con cupón de Groupon'}`
           : (notesExtra ? `[RESERVA WEB] ${notesExtra}` : '[RESERVA WEB] Cita reservada online por el paciente')
       };
 
