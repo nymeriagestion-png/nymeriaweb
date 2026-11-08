@@ -141,6 +141,15 @@
               </div>
             </div>
 
+            <!-- BONOS Y CUPONES ACTIVOS DEL PACIENTE -->
+            <div id="client-bonos-box" class="client-bonos-box hidden">
+              <div class="bonos-header">
+                <span class="bonos-title"><i data-lucide="ticket" class="text-gold"></i> Tus Bonos / Cupones Groupon (<span id="client-bonos-count">0</span>)</span>
+                <span class="text-xs text-muted">Sesiones disponibles</span>
+              </div>
+              <div id="client-bonos-list" class="client-bonos-list"></div>
+            </div>
+
             <!-- CITAS AGENDADAS DEL PACIENTE -->
             <div id="client-upcoming-box" class="client-upcoming-box">
               <div class="upcoming-box-header">
@@ -174,6 +183,11 @@
                   <div class="form-group">
                     <label for="step1-groupon-code"><i data-lucide="hash"></i> Código de Cupón / Seguridad Groupon *</label>
                     <input type="text" id="step1-groupon-code" class="portal-input groupon-input" placeholder="Ej: GRP-123456" oninput="BookingApp.onGrouponCodeInput(this.value)">
+                    <div id="step1-groupon-code-status" class="bono-code-status-line hidden"></div>
+                  </div>
+                  <div id="step1-groupon-bono-service-wrap" class="form-group full-width hidden">
+                    <label for="step1-groupon-bono-service"><i data-lucide="sparkles"></i> Tratamiento de este bono a realizar en la cita *</label>
+                    <select id="step1-groupon-bono-service" class="portal-select groupon-input" onchange="BookingApp.onGrouponBonoServiceChange(1, this.value)"></select>
                   </div>
                 </div>
                 <div id="step1-groupon-preview" class="groupon-offer-preview hidden"></div>
@@ -339,6 +353,11 @@
               <div class="form-group">
                 <label for="step2-groupon-code"><i data-lucide="hash"></i> Código de Cupón / Seguridad Groupon *</label>
                 <input type="text" id="step2-groupon-code" class="portal-input groupon-input" placeholder="Ej: GRP-123456" oninput="BookingApp.onGrouponCodeInput(this.value)">
+                <div id="step2-groupon-code-status" class="bono-code-status-line hidden"></div>
+              </div>
+              <div id="step2-groupon-bono-service-wrap" class="form-group full-width hidden">
+                <label for="step2-groupon-bono-service"><i data-lucide="sparkles"></i> Tratamiento de este bono a realizar en la cita *</label>
+                <select id="step2-groupon-bono-service" class="portal-select groupon-input" onchange="BookingApp.onGrouponBonoServiceChange(2, this.value)"></select>
               </div>
             </div>
             <div id="step2-groupon-preview" class="groupon-offer-preview hidden"></div>
@@ -605,6 +624,11 @@
                   <div class="form-group">
                     <label for="online-groupon-code"><i data-lucide="hash"></i> Código de Cupón / Seguridad Groupon *</label>
                     <input type="text" id="online-groupon-code" class="portal-input groupon-input" placeholder="Ej: GRP-123456" oninput="BookingApp.onGrouponCodeInput(this.value)">
+                    <div id="online-groupon-code-status" class="bono-code-status-line hidden"></div>
+                  </div>
+                  <div id="online-groupon-bono-service-wrap" class="form-group full-width hidden">
+                    <label for="online-groupon-bono-service"><i data-lucide="sparkles"></i> Tratamiento de este bono a realizar en la cita *</label>
+                    <select id="online-groupon-bono-service" class="portal-select groupon-input" onchange="BookingApp.onGrouponBonoServiceChange(4, this.value)"></select>
                   </div>
                 </div>
                 <div id="online-groupon-preview" class="groupon-offer-preview hidden"></div>

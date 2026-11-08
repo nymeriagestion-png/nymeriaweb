@@ -32,6 +32,7 @@ const BookingApp = {
   allServices: [],
   services: [],
   grouponOffers: [],
+  grouponVouchers: [],
   professionals: [],
   defaultSchedules: {},
   blockedDates: [],
@@ -49,6 +50,7 @@ const BookingApp = {
   hasGroupon: false,
   selectedGrouponValue: '',
   selectedGrouponOffer: null,
+  selectedBonoServiceId: '',
   grouponCode: '',
 
   // Días laborables generados
@@ -111,6 +113,7 @@ const BookingApp = {
       // En la web pública NUNCA se muestran servicios gratuitos (0 €) ni revisiones internas
       this.services = rawServices.filter(s => s && Number(s.price) > 0 && !s.internalOnly);
       this.grouponOffers = (Array.isArray(data.grouponOffers) ? data.grouponOffers : []).filter(o => o && o.active !== false);
+      this.grouponVouchers = Array.isArray(data.grouponVouchers) ? data.grouponVouchers : [];
       this.professionals = Array.isArray(data.professionals) ? data.professionals : [];
       this.defaultSchedules = data.defaultSchedules || {};
       this.blockedDates = Array.isArray(data.blockedDates) ? data.blockedDates : [];
@@ -151,6 +154,25 @@ const BookingApp = {
       if (!this.grouponCode || !this.grouponCode.trim()) {
         this.showToast('Introduce tu código de cupón / seguridad de Groupon para continuar (o desmarca la casilla si no usas cupón).', 'warning');
         return;
+      }
+
+      // Validación estricta de bono multi-sesión agotado
+      const usage = this.getVoucherUsage(this.grouponCode, this.selectedGrouponOffer?.id);
+      const existsInDb = usage.allAppts.length > 0 || usage.manualUsed > 0 ||
+        (this.grouponVouchers || []).some(v => this.normalizeGrouponCode(v.code || v.normalizedCode) === usage.normalizedCode);
+
+      if (existsInDb && usage.availableToBook <= 0) {
+        alert(`El cupón "${usage.code}" ya no tiene sesiones disponibles para reservar (${usage.spent} gastadas + ${usage.reservedFromAppts} en agenda de ${usage.totalSessions} totales).\n\nSi necesitas ayuda o crees que se trata de un error, por favor contacta con la clínica en el 643 304 897.`);
+        return;
+      }
+
+      if (existsInDb && usage.isMixedBono && usage.breakdown) {
+        const targetSid = this.selectedBonoServiceId || (this.selectedService && this.selectedService.id);
+        const bItem = usage.breakdown.find(b => String(b.serviceId) === String(targetSid));
+        if (bItem && bItem.availableToBook <= 0) {
+          alert(`El tratamiento "${bItem.serviceName}" ya no tiene sesiones libres en este bono (${bItem.spent}/${bItem.total} gastadas).\n\nPor favor, selecciona otro tratamiento incluido en tu bono para esta cita.`);
+          return;
+        }
       }
     }
     if (targetStep > 3 && (!this.selectedDate || !this.selectedSlot)) {
@@ -407,6 +429,8 @@ const BookingApp = {
           `;
         }
       }
+
+      this.renderClientBonos();
     }
 
     this.populateGrouponOfferSelects();
@@ -441,43 +465,596 @@ const BookingApp = {
   },
 
   // ========================================================================
-  // GESTIÓN DE OFERTAS Y CUPONES GROUPON (PASOS 1, 2 Y 4)
+  // GESTIÓN DE OFERTAS Y BONOS / CUPONES GROUPON (PASOS 1, 2 Y 4)
   // ========================================================================
+  normalizeGrouponCode(code) {
+    return String(code || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[\s\-]/g, '');
+  },
+
+  getOfferMode(offer) {
+    if (!offer) return 'combo';
+    if (offer.packMode === 'bono' || offer.packMode === 'combo') return offer.packMode;
+    const list = Array.isArray(offer.services) ? offer.services : [];
+    if (list.length > 1) return 'combo';
+    if (Number(offer.sessionsCount || 1) > 1) return 'bono';
+    return 'combo';
+  },
+
+  getOfferServicesList(offer) {
+    if (!offer) return [];
+    if (Array.isArray(offer.services) && offer.services.length > 0) {
+      return offer.services.map(s => {
+        const live = (this.allServices || []).find(x => String(x.id) === String(s.id));
+        return {
+          id: s.id,
+          name: (live && live.name) || s.name,
+          category: (live && live.category) || s.category || 'medico',
+          duration: Number((live && live.duration) || s.duration) || 45,
+          price: Number((live && live.price) || s.price) || 0,
+          sessions: Math.max(1, parseInt(s.sessions, 10) || 1)
+        };
+      });
+    }
+    const servId = offer.serviceId;
+    const serv = (this.allServices || []).find(x => String(x.id) === String(servId));
+    if (serv) {
+      return [{
+        id: serv.id,
+        name: serv.name,
+        category: serv.category,
+        duration: Number(serv.duration) || 45,
+        price: Number(serv.price) || 0,
+        sessions: Math.max(1, parseInt(offer.sessionsCount || 1, 10) || 1)
+      }];
+    }
+    return [];
+  },
+
+  getOfferTotalSessions(offer) {
+    if (!offer) return 1;
+    const mode = this.getOfferMode(offer);
+    const list = this.getOfferServicesList(offer);
+    if (mode === 'combo') {
+      return Math.max(1, parseInt(offer.comboRepeats || offer.sessionsCount || 1, 10) || 1);
+    }
+    if (list.length > 0) {
+      return list.reduce((sum, s) => sum + Math.max(1, parseInt(s.sessions, 10) || 1), 0);
+    }
+    return Math.max(1, parseInt(offer.sessionsCount || 1, 10) || 1);
+  },
+
+  getVoucherUsage(codeOrObj, fallbackOfferId = '', fallbackAppt = null, overrideData = null) {
+    let voucherObj = null;
+    let rawCode = '';
+    if (codeOrObj && typeof codeOrObj === 'object') {
+      voucherObj = codeOrObj;
+      rawCode = codeOrObj.code || codeOrObj.normalizedCode || '';
+    } else {
+      rawCode = String(codeOrObj || '');
+    }
+
+    const normCode = this.normalizeGrouponCode(rawCode);
+    const data = overrideData || this.backupData || {};
+    const appointmentsList = Array.isArray(data.appointments) ? data.appointments : (this.appointments || []);
+    const vouchersList = Array.isArray(data.grouponVouchers) ? data.grouponVouchers : (this.grouponVouchers || []);
+    const offersList = Array.isArray(data.grouponOffers) ? data.grouponOffers : (this.grouponOffers || []);
+
+    if (!voucherObj && normCode) {
+      voucherObj = vouchersList.find(v =>
+        this.normalizeGrouponCode(v.code || v.normalizedCode) === normCode
+      ) || null;
+    }
+
+    const matchingAppts = normCode
+      ? appointmentsList.filter(a => {
+          if (!a || a.status === 'Cancelada') return false;
+          const isGrp = (a.origin === 'groupon' || a.paymentMethod === 'Cupón Groupon');
+          return isGrp && this.normalizeGrouponCode(a.grouponCode) === normCode;
+        })
+      : [];
+
+    const offerId = fallbackOfferId ||
+      (voucherObj && voucherObj.offerId) ||
+      (matchingAppts.find(a => a.grouponOfferId)?.grouponOfferId) ||
+      (fallbackAppt && fallbackAppt.grouponOfferId) ||
+      '';
+    const offer = offerId ? offersList.find(o => String(o.id) === String(offerId)) : null;
+
+    let services = [];
+    if (offer) {
+      services = this.getOfferServicesList(offer);
+    } else if (voucherObj && Array.isArray(voucherObj.services) && voucherObj.services.length > 0) {
+      services = voucherObj.services.map(s => ({
+        id: s.id,
+        name: s.name,
+        category: s.category || 'medico',
+        duration: Number(s.duration) || 45,
+        price: Number(s.price) || 0,
+        sessions: Math.max(1, parseInt(s.sessions, 10) || 1)
+      }));
+    } else if (fallbackAppt || matchingAppts[0]) {
+      const refA = fallbackAppt || matchingAppts[0];
+      if (Array.isArray(refA.packServices) && refA.packServices.length > 0) {
+        services = refA.packServices.map(s => ({
+          id: s.id,
+          name: s.name,
+          category: s.category || 'medico',
+          duration: Number(s.duration) || 45,
+          price: Number(s.price) || 0,
+          sessions: Math.max(1, parseInt(s.sessions, 10) || 1)
+        }));
+      } else if (refA.serviceId) {
+        services = [{
+          id: refA.bonoTargetServiceId || refA.serviceId,
+          name: refA.serviceName || 'Tratamiento Groupon',
+          category: 'medico',
+          duration: Number(refA.duration) || 45,
+          price: Number(refA.originalPrice ?? refA.price ?? 0),
+          sessions: Math.max(1, parseInt(refA.bonoTotalSessions, 10) || 1)
+        }];
+      }
+    }
+
+    let packMode = 'combo';
+    if (offer) packMode = this.getOfferMode(offer);
+    else if (voucherObj && (voucherObj.packMode === 'bono' || voucherObj.packMode === 'combo')) packMode = voucherObj.packMode;
+    else if (matchingAppts[0] && matchingAppts[0].grouponPackMode) packMode = matchingAppts[0].grouponPackMode;
+    else if (services.length <= 1 && Number(voucherObj?.totalSessions || matchingAppts[0]?.bonoTotalSessions || 1) > 1) packMode = 'bono';
+
+    const isMixedBono = (packMode === 'bono' && services.length > 1);
+    const activeAppts = matchingAppts.filter(a => a.status !== 'Completada');
+
+    if (isMixedBono) {
+      const manualMap = (voucherObj && voucherObj.manualUsedByService && typeof voucherObj.manualUsedByService === 'object')
+        ? voucherObj.manualUsedByService
+        : {};
+      const breakdown = services.map(s => {
+        const sAppts = matchingAppts.filter(a => String(a.bonoTargetServiceId || a.serviceId) === String(s.id));
+        const sCompleted = sAppts.filter(a => a.status === 'Completada').length;
+        const sActive = sAppts.filter(a => a.status !== 'Completada');
+        const sReserved = sActive.length;
+        const sManual = Math.max(0, parseInt(manualMap[s.id], 10) || 0);
+        const sTotal = Math.max(1, parseInt(s.sessions, 10) || 1);
+        const sSpent = Math.min(sTotal, sCompleted + sManual);
+        const sAvailable = Math.max(0, sTotal - sSpent - sReserved);
+        return {
+          serviceId: s.id,
+          serviceName: s.name,
+          category: s.category,
+          duration: s.duration,
+          total: sTotal,
+          completedFromAppts: sCompleted,
+          reservedFromAppts: sReserved,
+          manualUsed: sManual,
+          spent: sSpent,
+          remainingPhysical: Math.max(0, sTotal - sSpent),
+          availableToBook: sAvailable,
+          activeAppts: sActive
+        };
+      });
+
+      const totalSessions = breakdown.reduce((sum, b) => sum + b.total, 0);
+      const completedFromAppts = breakdown.reduce((sum, b) => sum + b.completedFromAppts, 0);
+      const reservedFromAppts = breakdown.reduce((sum, b) => sum + b.reservedFromAppts, 0);
+      const manualUsed = breakdown.reduce((sum, b) => sum + b.manualUsed, 0);
+      const spent = breakdown.reduce((sum, b) => sum + b.spent, 0);
+      const availableToBook = breakdown.reduce((sum, b) => sum + b.availableToBook, 0);
+
+      return {
+        code: (voucherObj && voucherObj.code) || (matchingAppts[0] && matchingAppts[0].grouponCode) || rawCode.trim().toUpperCase(),
+        normalizedCode: normCode,
+        offerId: offer ? offer.id : offerId,
+        offer,
+        offerTitle: offer
+          ? this.getGrouponOfferParts(offer).displayTitle
+          : ((voucherObj && voucherObj.offerTitle) || (matchingAppts[0] && (matchingAppts[0].grouponOfferTitle || matchingAppts[0].serviceName)) || 'Bono Groupon'),
+        packMode: 'bono',
+        isMixedBono: true,
+        services,
+        breakdown,
+        totalSessions,
+        completedFromAppts,
+        reservedFromAppts,
+        manualUsed,
+        spent,
+        remainingPhysical: Math.max(0, totalSessions - spent),
+        availableToBook,
+        isExhausted: spent >= totalSessions,
+        activeAppts,
+        allAppts: matchingAppts
+      };
+    }
+
+    let totalSessions = 1;
+    if (offer) {
+      totalSessions = this.getOfferTotalSessions(offer);
+    } else if (voucherObj && Number(voucherObj.totalSessions) > 0) {
+      totalSessions = Math.max(1, parseInt(voucherObj.totalSessions, 10) || 1);
+    } else if (matchingAppts[0] && Number(matchingAppts[0].bonoTotalSessions) > 0) {
+      totalSessions = Math.max(1, parseInt(matchingAppts[0].bonoTotalSessions, 10) || 1);
+    } else if (fallbackAppt && Number(fallbackAppt.bonoTotalSessions) > 0) {
+      totalSessions = Math.max(1, parseInt(fallbackAppt.bonoTotalSessions, 10) || 1);
+    } else if (services.length === 1) {
+      totalSessions = Math.max(1, parseInt(services[0].sessions, 10) || 1);
+    }
+
+    const completedFromAppts = matchingAppts.filter(a => a.status === 'Completada').length;
+    const reservedFromAppts = activeAppts.length;
+    const manualUsed = Math.max(0, parseInt(voucherObj && voucherObj.manualUsed, 10) || 0);
+    const spent = Math.min(totalSessions, completedFromAppts + manualUsed);
+    const availableToBook = Math.max(0, totalSessions - spent - reservedFromAppts);
+
+    return {
+      code: (voucherObj && voucherObj.code) || (matchingAppts[0] && matchingAppts[0].grouponCode) || rawCode.trim().toUpperCase(),
+      normalizedCode: normCode,
+      offerId: offer ? offer.id : offerId,
+      offer,
+      offerTitle: offer
+        ? this.getGrouponOfferParts(offer).displayTitle
+        : ((voucherObj && voucherObj.offerTitle) || (matchingAppts[0] && (matchingAppts[0].grouponOfferTitle || matchingAppts[0].serviceName)) || 'Cupón Groupon'),
+      packMode,
+      isMixedBono: false,
+      services,
+      breakdown: null,
+      totalSessions,
+      completedFromAppts,
+      reservedFromAppts,
+      manualUsed,
+      spent,
+      remainingPhysical: Math.max(0, totalSessions - spent),
+      availableToBook,
+      isExhausted: spent >= totalSessions,
+      activeAppts,
+      allAppts: matchingAppts
+    };
+  },
+
+  upsertGrouponVoucherRecord({ code, client, offer, appointment = null, manualDelta = 0, manualServiceId = null }, targetData = null) {
+    const normCode = this.normalizeGrouponCode(code || (appointment && appointment.grouponCode));
+    if (!normCode) return null;
+
+    const dataObj = targetData || this.backupData || {};
+    if (!Array.isArray(dataObj.grouponVouchers)) dataObj.grouponVouchers = [];
+    let existing = dataObj.grouponVouchers.find(v =>
+      this.normalizeGrouponCode(v.code || v.normalizedCode) === normCode
+    );
+
+    const offersList = Array.isArray(dataObj.grouponOffers) ? dataObj.grouponOffers : (this.grouponOffers || []);
+    const resolvedOffer = offer ||
+      (appointment && appointment.grouponOfferId ? offersList.find(o => String(o.id) === String(appointment.grouponOfferId)) : null) ||
+      (existing && existing.offerId ? offersList.find(o => String(o.id) === String(existing.offerId)) : null);
+
+    const parts = resolvedOffer ? this.getGrouponOfferParts(resolvedOffer) : null;
+    const packMode = parts ? parts.packMode : ((existing && existing.packMode) || (appointment && appointment.grouponPackMode) || 'combo');
+    const totalSessions = parts
+      ? parts.totalSessions
+      : Math.max(1, parseInt((existing && existing.totalSessions) || (appointment && appointment.bonoTotalSessions) || 1, 10) || 1);
+
+    let servicesSnap = parts && parts.packList.length > 0
+      ? parts.packList.map(s => ({ id: s.id, name: s.name, category: s.category, duration: s.duration, price: s.price, sessions: s.sessions }))
+      : ((existing && Array.isArray(existing.services) && existing.services.length > 0) ? existing.services : []);
+
+    if (servicesSnap.length === 0 && appointment && appointment.serviceId) {
+      servicesSnap = [{
+        id: appointment.bonoTargetServiceId || appointment.serviceId,
+        name: appointment.serviceName || 'Tratamiento Groupon',
+        category: 'medico',
+        duration: Number(appointment.duration) || 45,
+        price: Number(appointment.originalPrice ?? appointment.price ?? 0),
+        sessions: totalSessions
+      }];
+    }
+
+    const nowIso = new Date().toISOString();
+    const displayCode = String(code || (existing && existing.code) || (appointment && appointment.grouponCode) || normCode).trim().toUpperCase();
+
+    if (!existing) {
+      existing = {
+        id: 'vch-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
+        code: displayCode,
+        normalizedCode: normCode,
+        clientId: (client && client.id) || (appointment && appointment.clientId) || '',
+        clientName: (client && client.name) || (appointment && appointment.clientName) || '',
+        clientDni: (client && client.dni) || (appointment && appointment.clientDni) || '',
+        clientPhone: (client && client.phone) || (appointment && appointment.clientPhone) || '',
+        offerId: resolvedOffer ? resolvedOffer.id : ((appointment && appointment.grouponOfferId) || ''),
+        offerTitle: (parts && parts.displayTitle) || (appointment && (appointment.grouponOfferTitle || appointment.serviceName)) || 'Bono Groupon',
+        packMode,
+        totalSessions,
+        services: servicesSnap,
+        manualUsed: 0,
+        manualUsedByService: {},
+        createdAt: nowIso,
+        updatedAt: nowIso
+      };
+      dataObj.grouponVouchers.unshift(existing);
+    } else {
+      existing.code = displayCode || existing.code;
+      existing.normalizedCode = normCode;
+      if (client) {
+        if (client.id) existing.clientId = client.id;
+        if (client.name) existing.clientName = client.name;
+        if (client.dni) existing.clientDni = client.dni;
+        if (client.phone) existing.clientPhone = client.phone;
+      } else if (appointment) {
+        if (appointment.clientId && !existing.clientId) existing.clientId = appointment.clientId;
+        if (appointment.clientName && !existing.clientName) existing.clientName = appointment.clientName;
+        if (appointment.clientDni && !existing.clientDni) existing.clientDni = appointment.clientDni;
+        if (appointment.clientPhone && !existing.clientPhone) existing.clientPhone = appointment.clientPhone;
+      }
+      if (resolvedOffer) {
+        existing.offerId = resolvedOffer.id;
+        existing.offerTitle = parts.displayTitle;
+        existing.packMode = packMode;
+        existing.totalSessions = totalSessions;
+        existing.services = servicesSnap;
+      } else if (appointment && Number(appointment.bonoTotalSessions) > Number(existing.totalSessions || 1)) {
+        existing.totalSessions = Number(appointment.bonoTotalSessions);
+      }
+      existing.updatedAt = nowIso;
+    }
+
+    if (manualDelta !== 0) {
+      const usageNow = this.getVoucherUsage(existing, '', null, dataObj);
+      if (packMode === 'bono' && servicesSnap.length > 1) {
+        if (!existing.manualUsedByService || typeof existing.manualUsedByService !== 'object') existing.manualUsedByService = {};
+        const sid = manualServiceId || (servicesSnap[0] && servicesSnap[0].id);
+        if (sid) {
+          const curVal = Math.max(0, parseInt(existing.manualUsedByService[sid], 10) || 0);
+          existing.manualUsedByService[sid] = Math.max(0, curVal + manualDelta);
+          existing.manualUsed = Object.values(existing.manualUsedByService).reduce((sum, n) => sum + (parseInt(n, 10) || 0), 0);
+        }
+      } else {
+        const curVal = Math.max(0, parseInt(existing.manualUsed, 10) || 0);
+        existing.manualUsed = Math.max(0, curVal + manualDelta);
+      }
+    }
+
+    return existing;
+  },
+
+  doesRecordBelongToClient(rec, cli) {
+    if (!rec || !cli) return false;
+    if (rec.clientId && String(rec.clientId) === String(cli.id)) return true;
+    const cleanDni = cli.dni ? String(cli.dni).trim().toUpperCase().replace(/[\s\-]/g, '') : '';
+    const recDni = rec.clientDni ? String(rec.clientDni).trim().toUpperCase().replace(/[\s\-]/g, '') : '';
+    if (cleanDni && recDni && cleanDni === recDni) return true;
+    const cleanPhone = cli.phone ? String(cli.phone).replace(/\D/g, '') : '';
+    const recPhone = rec.clientPhone ? String(rec.clientPhone).replace(/\D/g, '') : '';
+    if (cleanPhone.length >= 7 && recPhone.length >= 7 && cleanPhone === recPhone) return true;
+    return false;
+  },
+
+  getClientGrouponVouchers(client, targetData = null) {
+    if (!client) return [];
+    const dataObj = targetData || this.backupData || {};
+    const vouchersList = Array.isArray(dataObj.grouponVouchers) ? dataObj.grouponVouchers : (this.grouponVouchers || []);
+    const apptsList = Array.isArray(dataObj.appointments) ? dataObj.appointments : (this.appointments || []);
+
+    const byNormCode = new Map();
+
+    vouchersList.forEach(v => {
+      if (!this.doesRecordBelongToClient(v, client)) return;
+      const norm = this.normalizeGrouponCode(v.code || v.normalizedCode);
+      if (!norm) return;
+      byNormCode.set(norm, { voucher: v, fallbackOfferId: v.offerId || '', fallbackAppt: null });
+    });
+
+    apptsList.forEach(a => {
+      if (!a || a.status === 'Cancelada') return;
+      const isGrp = (a.origin === 'groupon' || a.paymentMethod === 'Cupón Groupon');
+      if (!isGrp || !a.grouponCode) return;
+      if (!this.doesRecordBelongToClient(a, client)) return;
+      const norm = this.normalizeGrouponCode(a.grouponCode);
+      if (!norm) return;
+      if (!byNormCode.has(norm)) {
+        byNormCode.set(norm, { voucher: null, fallbackOfferId: a.grouponOfferId || '', fallbackAppt: a });
+      }
+    });
+
+    const list = [];
+    byNormCode.forEach((entry) => {
+      const usage = this.getVoucherUsage(entry.voucher || entry.fallbackAppt.grouponCode, entry.fallbackOfferId, entry.fallbackAppt, dataObj);
+      list.push({ voucher: entry.voucher, usage });
+    });
+
+    list.sort((a, b) => {
+      const aActive = a.usage.availableToBook > 0 ? 0 : (a.usage.remainingPhysical > 0 ? 1 : 2);
+      const bActive = b.usage.availableToBook > 0 ? 0 : (b.usage.remainingPhysical > 0 ? 1 : 2);
+      if (aActive !== bActive) return aActive - bActive;
+      return b.usage.totalSessions - a.usage.totalSessions;
+    });
+
+    return list;
+  },
+
+  renderClientBonos() {
+    const box = document.getElementById('client-bonos-box');
+    const listEl = document.getElementById('client-bonos-list');
+    const badgeCount = document.getElementById('client-bonos-count');
+    if (!box || !listEl) return;
+
+    if (!this.currentClient) {
+      box.classList.add('hidden');
+      listEl.innerHTML = '';
+      return;
+    }
+
+    const vouchers = this.getClientGrouponVouchers(this.currentClient).filter(v => v.usage.totalSessions > 1 || !v.usage.isExhausted);
+    if (vouchers.length === 0) {
+      box.classList.add('hidden');
+      listEl.innerHTML = '';
+      return;
+    }
+
+    box.classList.remove('hidden');
+    if (badgeCount) badgeCount.textContent = vouchers.length;
+
+    listEl.innerHTML = vouchers.map(({ usage }) => {
+      const pctSpent = usage.totalSessions > 0 ? Math.min(100, Math.round((usage.spent / usage.totalSessions) * 100)) : 0;
+      const pctRes = usage.totalSessions > 0 ? Math.min(100 - pctSpent, Math.round((usage.reservedFromAppts / usage.totalSessions) * 100)) : 0;
+      const cardCls = usage.isExhausted ? 'bono-portal-card exhausted' : 'bono-portal-card';
+
+      const breakdownHtml = (usage.isMixedBono && usage.breakdown) ? `
+        <div class="bono-mixed-breakdown">
+          ${usage.breakdown.map(b => `
+            <div class="bono-mixed-item">
+              <span><b>${this.escapeHtmlStr(b.serviceName)}:</b> ${b.spent}/${b.total} gast. • ${b.reservedFromAppts} en agenda</span>
+              <span style="color:${b.availableToBook > 0 ? '#4ade80' : 'var(--text-muted)'};">${b.availableToBook > 0 ? `Quedan ${b.availableToBook} libres` : '0 libres'}</span>
+            </div>
+          `).join('')}
+        </div>
+      ` : '';
+
+      return `
+        <div class="${cardCls}">
+          <div class="bono-portal-top">
+            <div>
+              <span class="bono-code-pill">🎫 ${this.escapeHtmlStr(usage.code)}</span>
+              <strong style="margin-left:8px;font-size:0.9rem;">${this.escapeHtmlStr(usage.offerTitle)}</strong>
+            </div>
+            ${usage.availableToBook > 0 ? `
+              <button type="button" class="btn-portal btn-sm btn-groupon" style="padding:4px 12px;font-size:0.75rem;" onclick="BookingApp.useClientBonoForBooking('${this.escapeHtmlStr(usage.normalizedCode)}')">
+                <i data-lucide="calendar-plus"></i> <span>Pedir Cita con este Bono</span>
+              </button>
+            ` : `<span class="badge-tag" style="background:rgba(255,255,255,0.06);color:var(--text-muted);font-size:0.72rem;">Sin sesiones libres</span>`}
+          </div>
+
+          <div class="bono-progress-track" title="Verde: gastadas (${usage.spent}) | Ámbar: en agenda (${usage.reservedFromAppts})">
+            <div class="bono-progress-spent" style="width:${pctSpent}%"></div>
+            <div class="bono-progress-reserved" style="width:${pctRes}%"></div>
+          </div>
+
+          <div class="bono-stats-row">
+            <span>Gastadas: <b>${usage.spent}/${usage.totalSessions}</b></span>
+            <span>En agenda: <b>${usage.reservedFromAppts}</b></span>
+            <span>Quedan por gastar: <b>${usage.remainingPhysical}</b></span>
+            <span style="color:${usage.availableToBook > 0 ? '#4ade80' : 'var(--text-muted)'};">Libres para citar: <b>${usage.availableToBook}</b></span>
+          </div>
+
+          ${breakdownHtml}
+        </div>
+      `;
+    }).join('');
+
+    this.initIcons();
+  },
+
+  useClientBonoForBooking(normCode) {
+    const usage = this.getVoucherUsage(normCode);
+    if (!usage.normalizedCode) return;
+
+    if (usage.availableToBook <= 0) {
+      alert(`El bono "${usage.code}" ya no tiene sesiones libres para reservar cita (${usage.spent} gastadas + ${usage.reservedFromAppts} en agenda de ${usage.totalSessions}).`);
+      return;
+    }
+
+    this.hasGroupon = true;
+    this.grouponCode = usage.code;
+    let targetBonoServiceId = '';
+
+    if (usage.isMixedBono && usage.breakdown) {
+      const firstAvail = usage.breakdown.find(b => b.availableToBook > 0);
+      if (firstAvail) targetBonoServiceId = firstAvail.serviceId;
+    }
+
+    this.selectedBonoServiceId = targetBonoServiceId;
+
+    if (usage.offerId && this.grouponOffers.some(o => String(o.id) === String(usage.offerId))) {
+      this.selectedGrouponValue = usage.offerId;
+      this.selectedGrouponOffer = usage.offer;
+      const res = this.resolveGrouponSelection(usage.offerId, targetBonoServiceId);
+      if (res.service) this.selectedService = res.service;
+    } else if (usage.services && usage.services.length > 0) {
+      const targetSid = targetBonoServiceId || usage.services[0].id;
+      const serv = (this.allServices || []).find(s => String(s.id) === String(targetSid));
+      if (serv) {
+        this.selectedGrouponValue = `srv:${serv.id}`;
+        this.selectedGrouponOffer = null;
+        this.selectedService = serv;
+      }
+    }
+
+    this.syncGrouponUI();
+    this.updateServiceBanner();
+    this.showToast(`Bono ${usage.code} aplicado (${usage.availableToBook} sesiones libres)`);
+    this.goToStep(3);
+  },
+
   getGrouponOfferParts(offer) {
-    if (!offer) return { customTitle: '', internalName: '', displayTitle: '', isPack: false, packList: [] };
-    const packList = (Array.isArray(offer.services) && offer.services.length > 0) ? offer.services : [];
+    if (!offer) {
+      return {
+        customTitle: '', internalName: '', autoTitle: '', displayTitle: '',
+        isPack: false, packMode: 'combo', comboRepeats: 1, totalSessions: 1, packList: []
+      };
+    }
+    const packList = this.getOfferServicesList(offer);
+    const packMode = this.getOfferMode(offer);
+    const comboRepeats = Math.max(1, parseInt(offer.comboRepeats || 1, 10) || 1);
+    const totalSessions = this.getOfferTotalSessions(offer);
     const isPack = Boolean(offer.isPack || packList.length > 1);
-    const linkedServ = (this.allServices || []).find(s => String(s.id) === String(offer.serviceId)) || null;
-    const internalName = (
-      offer.serviceName ||
-      (packList.length > 0 ? packList.map(x => x.name).join(' + ') : '') ||
-      (linkedServ ? linkedServ.name : '') ||
-      offer.title ||
-      ''
-    ).trim();
+    const rawNames = packList.map(x => x.name).filter(Boolean).join(' + ');
+    const internalName = (offer.serviceName || rawNames || offer.title || '').trim();
+
+    let autoTitle = internalName;
+    if (packList.length === 1) {
+      autoTitle = totalSessions > 1
+        ? `Bono ${totalSessions} sesiones: ${packList[0].name}`
+        : (packList[0].name || internalName);
+    } else if (packList.length > 1 && packMode === 'combo') {
+      autoTitle = comboRepeats > 1
+        ? `Bono ${comboRepeats}× Pack (${rawNames || internalName})`
+        : (rawNames || internalName);
+    } else if (packList.length > 1 && packMode === 'bono') {
+      autoTitle = packList.map(x => `${x.sessions}× ${x.name}`).join(' + ');
+    }
+
     const rawCustom = (
       offer.customTitle ||
-      (offer.title && offer.title.trim() !== internalName ? offer.title : '') ||
+      (offer.title && offer.title.trim() !== internalName && offer.title.trim() !== autoTitle ? offer.title : '') ||
       ''
     ).trim();
-    const customTitle = (rawCustom && rawCustom !== internalName) ? rawCustom : '';
-    const displayTitle = customTitle || internalName || 'Oferta Groupon';
-    return { customTitle, internalName, displayTitle, isPack, packList };
+    const customTitle = (rawCustom && rawCustom !== internalName && rawCustom !== autoTitle) ? rawCustom : '';
+    const displayTitle = customTitle || autoTitle || internalName || 'Oferta Groupon';
+
+    return {
+      customTitle,
+      internalName: internalName || rawNames,
+      autoTitle,
+      displayTitle,
+      isPack,
+      packMode,
+      comboRepeats,
+      totalSessions,
+      packList
+    };
   },
 
   formatGrouponDisplayLabel(offer, serviceName) {
     if (!offer) return serviceName || '';
-    const { customTitle, internalName, displayTitle } = this.getGrouponOfferParts(offer);
-    const baseName = serviceName || internalName;
-    if (customTitle && baseName && customTitle !== baseName) {
-      return `${customTitle} (${baseName})`;
+    const parts = this.getGrouponOfferParts(offer);
+    const isMixed = (parts.packMode === 'bono' && parts.packList.length > 1);
+    if (isMixed) {
+      return `${serviceName} • [Bono: ${parts.displayTitle}]`;
     }
-    return baseName || displayTitle;
+    if (parts.customTitle && serviceName && parts.customTitle !== serviceName) {
+      return `${parts.customTitle} (${serviceName})`;
+    }
+    return serviceName || parts.displayTitle;
   },
 
   getEffectiveDuration() {
-    if (this.hasGroupon && this.selectedGrouponOffer && Number(this.selectedGrouponOffer.duration) > 0) {
-      return Number(this.selectedGrouponOffer.duration);
+    if (this.hasGroupon && this.selectedGrouponOffer) {
+      const parts = this.getGrouponOfferParts(this.selectedGrouponOffer);
+      if (parts.packMode === 'bono' && parts.packList.length > 1) {
+        return this.selectedService ? (Number(this.selectedService.duration) || 45) : 45;
+      }
+      if (Number(this.selectedGrouponOffer.duration) > 0) {
+        return Number(this.selectedGrouponOffer.duration);
+      }
     }
     return this.selectedService ? (Number(this.selectedService.duration) || 45) : 45;
   },
@@ -501,7 +1078,7 @@ const BookingApp = {
     };
   },
 
-  resolveGrouponSelection(val) {
+  resolveGrouponSelection(val, bonoServiceId = null) {
     if (!val) return { offer: null, service: null };
 
     if (String(val).startsWith('srv:')) {
@@ -513,17 +1090,42 @@ const BookingApp = {
     const offer = this.grouponOffers.find(o => String(o.id) === String(val)) || null;
     if (!offer) return { offer: null, service: null };
 
-    const packList = (Array.isArray(offer.services) && offer.services.length > 0) ? offer.services : null;
-    const isPack = Boolean(offer.isPack || (packList && packList.length > 1));
+    const parts = this.getGrouponOfferParts(offer);
+    const isMixedBono = (parts.isPack && parts.packMode === 'bono' && parts.packList.length > 1);
 
-    if (isPack && packList) {
-      const resolvedItems = packList.map(item => {
+    if (isMixedBono) {
+      const targetSid = bonoServiceId || this.selectedBonoServiceId || (parts.packList[0] && parts.packList[0].id);
+      let targetServ = (this.allServices || []).find(s => String(s.id) === String(targetSid));
+      if (!targetServ) {
+        const pItem = parts.packList.find(x => String(x.id) === String(targetSid)) || parts.packList[0];
+        targetServ = {
+          id: pItem.id,
+          name: pItem.name,
+          category: pItem.category || 'medico',
+          duration: Number(pItem.duration) || 45,
+          price: Number(pItem.price) || 0,
+          description: `Sesión de bono: ${pItem.name}`
+        };
+      }
+      return {
+        offer,
+        service: {
+          ...targetServ,
+          isPack: false,
+          bonoOfferTitle: parts.displayTitle
+        }
+      };
+    }
+
+    const isPackCombo = (parts.isPack && parts.packMode === 'combo');
+    if (isPackCombo && parts.packList.length > 0) {
+      const resolvedItems = parts.packList.map(item => {
         const live = this.allServices.find(s => String(s.id) === String(item.id));
         return live
           ? { id: live.id, name: live.name, category: live.category, duration: Number(live.duration) || 45, price: Number(live.price) || 0 }
           : { id: item.id, name: item.name, category: item.category || 'medico', duration: Number(item.duration) || 45, price: Number(item.price) || 0 };
       });
-      const packName = offer.serviceName || offer.title || resolvedItems.map(x => x.name).join(' + ');
+      const packName = parts.internalName || resolvedItems.map(x => x.name).join(' + ');
       const packCats = (Array.isArray(offer.categories) && offer.categories.length > 0)
         ? offer.categories
         : [...new Set(resolvedItems.map(x => x.category).filter(Boolean))];
@@ -580,11 +1182,13 @@ const BookingApp = {
           const priceTxt = isPrepago
             ? '0 € en clínica (Prepago Groupon)'
             : `${Number(o.grouponPrice).toFixed(2)} € en clínica`;
-          const { customTitle, internalName, displayTitle, isPack, packList } = this.getGrouponOfferParts(o);
-          const packTag = isPack ? `Pack (${packList.length}): ` : '';
+          const { customTitle, internalName, displayTitle, isPack, packMode, totalSessions, packList } = this.getGrouponOfferParts(o);
+          const packPrefix = isPack
+            ? (packMode === 'bono' ? `BONO (${totalSessions} ses.): ` : `PACK (${packList.length}): `)
+            : (totalSessions > 1 ? `BONO (${totalSessions} ses.): ` : '');
           const labelCore = customTitle
-            ? `${customTitle} — [${packTag || 'Incluye: '}${internalName}]`
-            : `${packTag}${displayTitle}`;
+            ? `${customTitle} — [${packPrefix || 'Incluye: '}${internalName}]`
+            : `${packPrefix}${displayTitle}`;
           const shortDesc = o.description ? ` (${o.description.length > 35 ? o.description.substring(0, 35) + '...' : o.description})` : '';
           const opt = document.createElement('option');
           opt.value = o.id;
@@ -613,6 +1217,7 @@ const BookingApp = {
     this.hasGroupon = false;
     this.selectedGrouponValue = '';
     this.selectedGrouponOffer = null;
+    this.selectedBonoServiceId = '';
     this.grouponCode = '';
     this.syncGrouponUI();
   },
@@ -646,16 +1251,91 @@ const BookingApp = {
       }
     });
 
-    const { offer, service } = this.resolveGrouponSelection(this.selectedGrouponValue);
+    const { offer, service } = this.resolveGrouponSelection(this.selectedGrouponValue, this.selectedBonoServiceId);
+    const parts = offer ? this.getGrouponOfferParts(offer) : null;
+    const isMixedBono = Boolean(parts && parts.isPack && parts.packMode === 'bono' && parts.packList.length > 1);
+
+    // Actualizar desplegables de bono mixto
+    ['step1', 'step2', 'online'].forEach(pfx => {
+      const wrap = document.getElementById(`${pfx}-groupon-bono-service-wrap`);
+      const sel = document.getElementById(`${pfx}-groupon-bono-service`);
+      if (!wrap || !sel) return;
+
+      if (!isMixedBono || !this.hasGroupon) {
+        wrap.classList.add('hidden');
+        sel.innerHTML = '';
+        return;
+      }
+
+      wrap.classList.remove('hidden');
+      const curVal = this.selectedBonoServiceId || (service && service.id);
+      const usage = this.grouponCode ? this.getVoucherUsage(this.grouponCode, offer.id) : null;
+
+      sel.innerHTML = '';
+      parts.packList.forEach(item => {
+        const bItem = (usage && usage.isMixedBono && usage.breakdown)
+          ? usage.breakdown.find(b => String(b.serviceId) === String(item.id))
+          : null;
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        if (bItem) {
+          opt.textContent = `${item.name} (${item.duration} min) — ${bItem.availableToBook > 0 ? `Quedan ${bItem.availableToBook} de ${bItem.total} sesión(es)` : `0 libres (${bItem.spent}/${bItem.total} gastadas, ${bItem.reservedFromAppts} en agenda)`}`;
+        } else {
+          opt.textContent = `${item.name} (${item.duration} min) • ${item.sessions} sesión(es) en este bono`;
+        }
+        if (String(item.id) === String(curVal)) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    });
+
+    // Actualizar avisos de estado de cupón / sesiones
+    const normCode = this.normalizeGrouponCode(this.grouponCode);
+    const usage = normCode ? this.getVoucherUsage(this.grouponCode, offer?.id) : null;
+    ['step1-groupon-code-status', 'step2-groupon-code-status', 'online-groupon-code-status'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (!normCode || !this.hasGroupon) {
+        el.className = 'bono-code-status-line hidden';
+        el.textContent = '';
+        return;
+      }
+
+      const existsInDb = usage && (usage.allAppts.length > 0 || usage.manualUsed > 0 ||
+        (this.grouponVouchers || []).some(v => this.normalizeGrouponCode(v.code || v.normalizedCode) === normCode));
+
+      if (existsInDb) {
+        if (usage.availableToBook > 0) {
+          let extraMsg = '';
+          if (usage.isMixedBono && usage.breakdown) {
+            const curTargetSid = this.selectedBonoServiceId || (service && service.id);
+            const bSel = usage.breakdown.find(b => String(b.serviceId) === String(curTargetSid));
+            if (bSel && bSel.availableToBook <= 0) {
+              extraMsg = ` — ⚠️ De "${bSel.serviceName}" ya no quedan sesiones libres (${bSel.spent}/${bSel.total})`;
+            }
+          }
+          el.className = 'bono-code-status-line' + (extraMsg ? ' warn' : '');
+          el.textContent = `✓ Bono ${usage.code}: ${usage.spent}/${usage.totalSessions} gastadas • Quedan ${usage.availableToBook} libre(s) para reservar${extraMsg}`;
+        } else {
+          el.className = 'bono-code-status-line warn';
+          el.textContent = `⚠️ El cupón ${usage.code} no tiene sesiones disponibles (${usage.spent}/${usage.totalSessions} gastadas, ${usage.reservedFromAppts} en agenda).`;
+        }
+      } else if (usage && usage.totalSessions > 1) {
+        el.className = 'bono-code-status-line';
+        el.textContent = `🆕 Bono nuevo de ${usage.totalSessions} sesiones: quedará activado con tu código al confirmar la cita.`;
+      } else {
+        el.className = 'bono-code-status-line hidden';
+        el.textContent = '';
+      }
+    });
+
     let previewHtml = '';
     if (this.hasGroupon && service) {
-      const effDur = (offer && Number(offer.duration) > 0) ? Number(offer.duration) : (Number(service.duration) || 45);
+      const effDur = this.getEffectiveDuration();
       const isPrepago = !offer || offer.paymentType !== 'pago_clinica' || Number(offer.grouponPrice || 0) === 0;
       const priceBadge = isPrepago
         ? '0,00 € en clínica (Ya pagado en Groupon)'
         : `${Number(offer.grouponPrice).toFixed(2)} € a abonar en clínica`;
       const esc = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      const parts = offer ? this.getGrouponOfferParts(offer) : null;
       const offerHeading = esc(parts ? parts.displayTitle : service.name);
       const safeServName = esc(service.name);
       const isPack = Boolean(service.isPack || (parts && parts.isPack));
@@ -665,15 +1345,17 @@ const BookingApp = {
         ? ` • Tarifa habitual${isPack ? ' conjunta' : ''}: ${Number(service.price).toFixed(0)} €`
         : '';
       const offerSub = offer
-        ? (isPack
-            ? (hasCustomAlias
-                ? `🎁 <b>Incluye (Pack de ${service.packItems ? service.packItems.length : offer.services.length}):</b> ${safeServName}${descTxt}${habitualTxt}`
-                : `🎁 Pack de ${service.packItems ? service.packItems.length : offer.services.length} tratamientos${descTxt}${habitualTxt}`)
-            : (hasCustomAlias
-                ? `<b>Tratamiento incluido en clínica:</b> ${safeServName}${descTxt}${habitualTxt}`
-                : (offer.description
-                    ? `${esc(offer.description)}${habitualTxt}`
-                    : `Tratamiento oficial con tu cupón${Number(service.price) > 0 ? ` (tarifa habitual: ${Number(service.price).toFixed(0)} €)` : ''}`)))
+        ? (isMixedBono
+            ? `🎟️ <b>Sesión de Bono Mixto (${parts.totalSessions} ses. totales):</b> ${safeServName}${descTxt}${habitualTxt}`
+            : (isPack
+                ? (hasCustomAlias
+                    ? `🎁 <b>Incluye (Pack de ${service.packItems ? service.packItems.length : offer.services.length}):</b> ${safeServName}${descTxt}${habitualTxt}`
+                    : `🎁 Pack de ${service.packItems ? service.packItems.length : offer.services.length} tratamientos${descTxt}${habitualTxt}`)
+                : (hasCustomAlias
+                    ? `<b>Tratamiento incluido en clínica:</b> ${safeServName}${descTxt}${habitualTxt}`
+                    : (offer.description
+                        ? `${esc(offer.description)}${habitualTxt}`
+                        : `Tratamiento oficial con tu cupón${Number(service.price) > 0 ? ` (tarifa habitual: ${Number(service.price).toFixed(0)} €)` : ''}`))))
         : `Tratamiento seleccionado del catálogo (${service.duration || 45} min)`;
 
       previewHtml = `
@@ -701,6 +1383,11 @@ const BookingApp = {
     });
 
     this.initIcons();
+  },
+
+  onGrouponBonoServiceChange(sourceStep, serviceId) {
+    this.selectedBonoServiceId = serviceId;
+    this.onGrouponOfferSelect(sourceStep, this.selectedGrouponValue);
   },
 
   toggleGrouponPanel(sourceStep) {
@@ -734,6 +1421,7 @@ const BookingApp = {
     } else {
       this.selectedGrouponValue = '';
       this.selectedGrouponOffer = null;
+      this.selectedBonoServiceId = '';
       this.grouponCode = '';
       this.syncGrouponUI();
       this.updateServiceBanner();
@@ -745,7 +1433,7 @@ const BookingApp = {
     this.hasGroupon = true;
     this.selectedGrouponValue = val || '';
 
-    const { offer, service } = this.resolveGrouponSelection(val);
+    const { offer, service } = this.resolveGrouponSelection(val, this.selectedBonoServiceId);
     if (val && service) {
       const prevServiceId = this.selectedService ? this.selectedService.id : null;
       const prevCategory = this.selectedService ? this.selectedService.category : null;
@@ -796,6 +1484,7 @@ const BookingApp = {
         el.value = val || '';
       }
     });
+    this.syncGrouponUI();
   },
 
   applyGrouponAndContinue(sourceStep) {
@@ -815,7 +1504,7 @@ const BookingApp = {
       return;
     }
 
-    const { offer, service } = this.resolveGrouponSelection(offerVal);
+    const { offer, service } = this.resolveGrouponSelection(offerVal, this.selectedBonoServiceId);
     if (!service) {
       alert('No se pudo vincular el tratamiento de esta oferta.');
       return;
@@ -825,6 +1514,25 @@ const BookingApp = {
       alert('Por favor introduce tu código de cupón o código de seguridad de Groupon.');
       codeEl?.focus();
       return;
+    }
+
+    // Validación estricta de bono multi-sesión
+    const usage = this.getVoucherUsage(code, offer?.id);
+    const existsInDb = usage.allAppts.length > 0 || usage.manualUsed > 0 ||
+      (this.grouponVouchers || []).some(v => this.normalizeGrouponCode(v.code || v.normalizedCode) === usage.normalizedCode);
+
+    if (existsInDb && usage.availableToBook <= 0) {
+      alert(`El cupón "${usage.code}" ya no tiene sesiones disponibles (${usage.spent} gastadas + ${usage.reservedFromAppts} en agenda de ${usage.totalSessions}). No es posible canjearlo.`);
+      return;
+    }
+
+    if (existsInDb && usage.isMixedBono && usage.breakdown) {
+      const targetSid = this.selectedBonoServiceId || service.id;
+      const bItem = usage.breakdown.find(b => String(b.serviceId) === String(targetSid));
+      if (bItem && bItem.availableToBook <= 0) {
+        alert(`El tratamiento "${bItem.serviceName}" ya no tiene sesiones libres en este bono (${bItem.spent}/${bItem.total} gastadas). Por favor selecciona otro tratamiento incluido.`);
+        return;
+      }
     }
 
     this.hasGroupon = true;
@@ -1584,11 +2292,48 @@ const BookingApp = {
         }
       }
 
+      // 2b. Re-validación del cupón/bono con los datos frescos de GitHub
+      if (hasGroupon && grpOffer) {
+        const freshUsage = this.getVoucherUsage(grouponCode, grpOffer.id, null, freshData);
+        const existsFresh = freshUsage.allAppts.length > 0 || freshUsage.manualUsed > 0 ||
+          (Array.isArray(freshData.grouponVouchers) && freshData.grouponVouchers.some(v => this.normalizeGrouponCode(v.code || v.normalizedCode) === freshUsage.normalizedCode));
+
+        if (existsFresh && freshUsage.availableToBook <= 0) {
+          alert(`El cupón "${freshUsage.code}" ya no dispone de sesiones libres (${freshUsage.spent} gastadas + ${freshUsage.reservedFromAppts} en agenda de ${freshUsage.totalSessions}). No se puede completar la reserva.`);
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Confirmar Mi Reserva Online</span>`;
+            this.initIcons();
+          }
+          return;
+        }
+
+        if (existsFresh && freshUsage.isMixedBono && freshUsage.breakdown) {
+          const targetSid = this.selectedBonoServiceId || this.selectedService.id;
+          const bItem = freshUsage.breakdown.find(b => String(b.serviceId) === String(targetSid));
+          if (bItem && bItem.availableToBook <= 0) {
+            alert(`El tratamiento "${bItem.serviceName}" ya no tiene sesiones disponibles en este bono (${bItem.spent}/${bItem.total} gastadas).`);
+            if (btn) {
+              btn.disabled = false;
+              btn.innerHTML = `<i data-lucide="check-circle-2"></i> <span>Confirmar Mi Reserva Online</span>`;
+              this.initIcons();
+            }
+            return;
+          }
+        }
+      }
+
       // 3. Crear el objeto de la cita
       const appointmentId = 'cita-web-' + Date.now();
       const refCode = `NYM-WEB-${Math.floor(10000 + Math.random() * 90000)}`;
 
-      const isPack = Boolean(this.selectedService.isPack || (grpOffer && (grpOffer.isPack || (Array.isArray(grpOffer.services) && grpOffer.services.length > 1))));
+      const offerMode = grpOffer ? this.getOfferMode(grpOffer) : null;
+      const isPackCombo = Boolean(hasGroupon && grpOffer && offerMode === 'combo');
+      const isMixedBono = Boolean(hasGroupon && grpOffer && offerMode === 'bono' && Array.isArray(grpOffer.services) && grpOffer.services.length > 1);
+      const totalSessionsOffer = grpOffer ? this.getOfferTotalSessions(grpOffer) : 1;
+      const targetBonoSid = isMixedBono ? (this.selectedBonoServiceId || this.selectedService.id) : null;
+
+      const isPack = Boolean(this.selectedService.isPack || isPackCombo);
       const packServices = isPack
         ? (this.selectedService.packItems || (grpOffer ? grpOffer.services : undefined))
         : undefined;
@@ -1617,19 +2362,34 @@ const BookingApp = {
         grouponOfferTitle: grpOfferLabel,
         grouponCode: hasGroupon ? grouponCode : '',
         grouponPaymentType: hasGroupon ? priceInfo.paymentType : null,
+        bonoTargetServiceId: targetBonoSid,
+        bonoTotalSessions: hasGroupon ? totalSessionsOffer : undefined,
+        grouponPackMode: offerMode || undefined,
         deposit: 0,
         depositMethod: null,
         status: 'Pendiente', // Cita pendiente de confirmación en recepción
         isOnline: true,
         createdBy: hasGroupon ? 'Reserva Web (Groupon)' : 'Reserva Web Online',
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         notes: hasGroupon
-          ? `[CUPÓN GROUPON: ${grouponCode}${grpOfferLabel ? ' • ' + grpOfferLabel : ''}] ${notesExtra || 'Reserva online con cupón de Groupon'}`
+          ? `[CUPÓN GROUPON: ${grouponCode}${grpOfferLabel ? ' • ' + grpOfferLabel : ''}${totalSessionsOffer > 1 ? ` (Bono ${totalSessionsOffer} ses.)` : ''}] ${notesExtra || 'Reserva online con cupón de Groupon'}`
           : (notesExtra ? `[RESERVA WEB] ${notesExtra}` : '[RESERVA WEB] Cita reservada online por el paciente')
       };
 
       // Colocar la nueva cita al principio
       freshData.appointments.unshift(newAppointment);
+
+      // 3b. Registrar / actualizar bono en grouponVouchers de freshData
+      if (hasGroupon && grpOffer) {
+        if (!Array.isArray(freshData.grouponVouchers)) freshData.grouponVouchers = [];
+        this.upsertGrouponVoucherRecord({
+          code: grouponCode,
+          client: this.currentClient,
+          offer: grpOffer,
+          appointment: newAppointment
+        }, freshData);
+      }
 
       // Actualizar estadísticas de backup
       if (!freshData.stats) freshData.stats = {};
@@ -1698,7 +2458,9 @@ const BookingApp = {
       this.backupData = freshData;
       this.clients = freshData.clients;
       this.appointments = freshData.appointments;
+      this.grouponVouchers = Array.isArray(freshData.grouponVouchers) ? freshData.grouponVouchers : [];
       if (this.currentClient) this.currentClient.isNewWebClient = false;
+      this.renderClientBonos();
 
       console.log('✓ Cita sincronizada con éxito en GitHub');
 
@@ -1833,10 +2595,21 @@ const BookingApp = {
   renderSuccess(appt, doc, refCode) {
     this.switchStep(5);
 
-    document.getElementById('success-ref-code').textContent = refCode;
-    document.getElementById('success-service-name').textContent = (appt.grouponOfferTitle && appt.grouponOfferTitle !== appt.serviceName)
+    let displayTitle = (appt.grouponOfferTitle && appt.grouponOfferTitle !== appt.serviceName)
       ? `${appt.grouponOfferTitle} (${appt.serviceName})`
       : appt.serviceName;
+
+    if (appt.grouponCode) {
+      const usage = this.getVoucherUsage(appt.grouponCode, appt.grouponOfferId);
+      if (usage && usage.totalSessions > 1) {
+        displayTitle += ` • Bono (${usage.spent}/${usage.totalSessions} sesiones gastadas)`;
+      } else {
+        displayTitle += ` • Cupón: ${appt.grouponCode}`;
+      }
+    }
+
+    document.getElementById('success-ref-code').textContent = refCode;
+    document.getElementById('success-service-name').textContent = displayTitle;
     document.getElementById('success-date-time').textContent = `${this.formatDateDisplay(appt.date)} a las ${appt.time} h`;
     document.getElementById('success-doctor-name').textContent = `${doc.name} (${doc.room})`;
     document.getElementById('success-client-name').textContent = `${appt.clientName} (${appt.clientPhone})`;

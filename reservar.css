@@ -1854,6 +1854,120 @@ html, body {
   margin-top: 8px;
 }
 
+/* BONOS Y CUPONES EN EL PORTAL WEB */
+.client-bonos-box {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(34, 197, 94, 0.05);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+.bonos-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.bonos-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #4ade80;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.client-bonos-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bono-portal-card {
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: var(--transition);
+}
+.bono-portal-card.exhausted {
+  opacity: 0.7;
+  border-color: var(--border-subtle);
+}
+.bono-portal-card:hover {
+  border-color: #4ade80;
+}
+.bono-portal-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.bono-code-pill {
+  font-family: monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(34, 197, 94, 0.16);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+.bono-progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  display: flex;
+}
+.bono-progress-spent {
+  background: #22c55e;
+  height: 100%;
+}
+.bono-progress-reserved {
+  background: #f59e0b;
+  height: 100%;
+}
+.bono-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.bono-mixed-breakdown {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(34, 197, 94, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bono-mixed-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+.bono-code-status-line {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: #4ade80;
+}
+.bono-code-status-line.warn {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #fca5a5;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .groupon-form-grid {
