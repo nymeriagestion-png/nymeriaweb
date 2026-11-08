@@ -490,6 +490,39 @@ const BookingApp = {
     const offer = this.grouponOffers.find(o => String(o.id) === String(val)) || null;
     if (!offer) return { offer: null, service: null };
 
+    const packList = (Array.isArray(offer.services) && offer.services.length > 0) ? offer.services : null;
+    const isPack = Boolean(offer.isPack || (packList && packList.length > 1));
+
+    if (isPack && packList) {
+      const resolvedItems = packList.map(item => {
+        const live = this.allServices.find(s => String(s.id) === String(item.id));
+        return live
+          ? { id: live.id, name: live.name, category: live.category, duration: Number(live.duration) || 45, price: Number(live.price) || 0 }
+          : { id: item.id, name: item.name, category: item.category || 'medico', duration: Number(item.duration) || 45, price: Number(item.price) || 0 };
+      });
+      const packName = offer.serviceName || offer.title || resolvedItems.map(x => x.name).join(' + ');
+      const packCats = (Array.isArray(offer.categories) && offer.categories.length > 0)
+        ? offer.categories
+        : [...new Set(resolvedItems.map(x => x.category).filter(Boolean))];
+      const totalOriginalPrice = resolvedItems.reduce((sum, x) => sum + Number(x.price || 0), 0);
+      const sumDuration = resolvedItems.reduce((sum, x) => sum + (Number(x.duration) || 45), 0);
+
+      return {
+        offer,
+        service: {
+          id: offer.serviceId || resolvedItems[0]?.id || ('pack-' + offer.id),
+          name: packName,
+          category: offer.category || packCats[0] || 'medico',
+          categories: packCats,
+          isPack: true,
+          packItems: resolvedItems,
+          duration: Number(offer.duration) || sumDuration || 45,
+          price: totalOriginalPrice > 0 ? totalOriginalPrice : Number(offer.grouponPrice || 0),
+          description: offer.description || `Pack Groupon (${resolvedItems.length} tratamientos): ${packName}.`
+        }
+      };
+    }
+
     let serv = this.allServices.find(s => String(s.id) === String(offer.serviceId)) || null;
     if (!serv) {
       serv = {
@@ -524,11 +557,14 @@ const BookingApp = {
           const priceTxt = isPrepago
             ? '0 € en clínica (Prepago Groupon)'
             : `${Number(o.grouponPrice).toFixed(2)} € en clínica`;
-          const baseName = o.serviceName || o.title || 'Oferta Groupon';
+          const packList = (Array.isArray(o.services) && o.services.length > 0) ? o.services : null;
+          const isPack = Boolean(o.isPack || (packList && packList.length > 1));
+          const baseName = o.serviceName || (packList ? packList.map(x => x.name).join(' + ') : '') || o.title || 'Oferta Groupon';
+          const packTag = isPack ? `Pack (${packList.length}): ` : '';
           const shortDesc = o.description ? ` (${o.description.length > 35 ? o.description.substring(0, 35) + '...' : o.description})` : '';
           const opt = document.createElement('option');
           opt.value = o.id;
-          opt.textContent = `${baseName}${shortDesc} • ${o.duration || 45} min (${priceTxt})`;
+          opt.textContent = `${packTag}${baseName}${shortDesc} • ${o.duration || 45} min (${priceTxt})`;
           select.appendChild(opt);
         });
       } else {
@@ -595,13 +631,16 @@ const BookingApp = {
         ? '0,00 € en clínica (Ya pagado en Groupon)'
         : `${Number(offer.grouponPrice).toFixed(2)} € a abonar en clínica`;
       const offerHeading = offer ? (offer.serviceName || offer.title || service.name) : service.name;
+      const isPack = Boolean(service.isPack || (offer && (offer.isPack || (Array.isArray(offer.services) && offer.services.length > 1))));
       const customAliasDiffers = offer && offer.title && offer.title !== service.name;
       const offerSub = offer
-        ? (customAliasDiffers
-            ? `Tratamiento incluido: <b>${service.name}</b>${offer.description ? ' • ' + offer.description : ''}`
-            : (offer.description
-                ? `${offer.description}${Number(service.price) > 0 ? ` • Tarifa habitual: ${Number(service.price).toFixed(0)} €` : ''}`
-                : `Tratamiento oficial con tu cupón${Number(service.price) > 0 ? ` (tarifa habitual: ${Number(service.price).toFixed(0)} €)` : ''}`))
+        ? (isPack
+            ? `🎁 Pack de ${service.packItems ? service.packItems.length : offer.services.length} tratamientos${offer.description ? ' • ' + offer.description : ''}${Number(service.price) > 0 ? ` • Tarifa habitual conjunta: ${Number(service.price).toFixed(0)} €` : ''}`
+            : (customAliasDiffers
+                ? `Tratamiento incluido: <b>${service.name}</b>${offer.description ? ' • ' + offer.description : ''}`
+                : (offer.description
+                    ? `${offer.description}${Number(service.price) > 0 ? ` • Tarifa habitual: ${Number(service.price).toFixed(0)} €` : ''}`
+                    : `Tratamiento oficial con tu cupón${Number(service.price) > 0 ? ` (tarifa habitual: ${Number(service.price).toFixed(0)} €)` : ''}`)))
         : `Tratamiento seleccionado del catálogo (${service.duration || 45} min)`;
 
       previewHtml = `
@@ -958,6 +997,31 @@ const BookingApp = {
   // ========================================================================
   // PASO 3: ESPECIALISTA, CALENDARIO Y TURNOS LIBRES
   // ========================================================================
+  getEligibleProfessionalsForSelectedService() {
+    if (!this.selectedService) return this.professionals;
+    const cats = (this.selectedService.categories && Array.isArray(this.selectedService.categories) && this.selectedService.categories.length > 0)
+      ? this.selectedService.categories
+      : [this.selectedService.category].filter(Boolean);
+
+    const profMatchesCat = (p, cat) => {
+      if (p.categories && Array.isArray(p.categories)) {
+        return p.categories.includes(cat) || p.role === cat;
+      }
+      return p.role === cat;
+    };
+
+    const primaryCat = cats[0];
+    const eligible = this.professionals.filter(p => cats.some(cat => profMatchesCat(p, cat)));
+    if (eligible.length === 0) return this.professionals;
+
+    // Priorizar especialistas de la categoría principal al asignar automáticamente
+    return [...eligible].sort((a, b) => {
+      const aPrim = primaryCat && profMatchesCat(a, primaryCat) ? 0 : 1;
+      const bPrim = primaryCat && profMatchesCat(b, primaryCat) ? 0 : 1;
+      return aPrim - bPrim;
+    });
+  },
+
   setupStep3() {
     if (!this.selectedService) return;
 
@@ -967,16 +1031,8 @@ const BookingApp = {
 
     select.innerHTML = '';
 
-    // Filtrar especialistas que realizan esta categoría
-    const servCat = this.selectedService.category;
-    let eligible = this.professionals.filter(p => {
-      if (p.categories && Array.isArray(p.categories)) {
-        return p.categories.includes(servCat) || p.role === servCat;
-      }
-      return p.role === servCat;
-    });
-
-    if (eligible.length === 0) eligible = this.professionals;
+    // Filtrar especialistas compatibles con el tratamiento o cualquiera del Pack
+    const eligible = this.getEligibleProfessionalsForSelectedService();
 
     // Opción por defecto: cualquier especialista disponible
     const optAny = document.createElement('option');
@@ -1186,14 +1242,7 @@ const BookingApp = {
     // Determinar qué doctores evaluar
     let eligibleProfs = [];
     if (this.selectedDoctorId === 'any') {
-      const cat = this.selectedService.category;
-      eligibleProfs = this.professionals.filter(p => {
-        if (p.categories && Array.isArray(p.categories)) {
-          return p.categories.includes(cat) || p.role === cat;
-        }
-        return p.role === cat;
-      });
-      if (eligibleProfs.length === 0) eligibleProfs = this.professionals;
+      eligibleProfs = this.getEligibleProfessionalsForSelectedService();
     } else {
       const p = this.professionals.find(x => x.id === this.selectedDoctorId);
       if (p) eligibleProfs = [p];
@@ -1505,6 +1554,11 @@ const BookingApp = {
       const appointmentId = 'cita-web-' + Date.now();
       const refCode = `NYM-WEB-${Math.floor(10000 + Math.random() * 90000)}`;
 
+      const isPack = Boolean(this.selectedService.isPack || (grpOffer && (grpOffer.isPack || (Array.isArray(grpOffer.services) && grpOffer.services.length > 1))));
+      const packServices = isPack
+        ? (this.selectedService.packItems || (grpOffer ? grpOffer.services : undefined))
+        : undefined;
+
       const newAppointment = {
         id: appointmentId,
         refCode: refCode,
@@ -1522,8 +1576,10 @@ const BookingApp = {
         price: priceInfo.price,
         originalPrice: Number(this.selectedService.price) || 0,
         origin: hasGroupon ? 'groupon' : 'habitual',
+        isPack: isPack,
+        packServices: packServices,
         grouponOfferId: grpOffer ? grpOffer.id : '',
-        grouponOfferTitle: grpOffer ? grpOffer.title : '',
+        grouponOfferTitle: grpOffer ? (grpOffer.serviceName || grpOffer.title) : '',
         grouponCode: hasGroupon ? grouponCode : '',
         grouponPaymentType: hasGroupon ? priceInfo.paymentType : null,
         deposit: 0,
@@ -1533,7 +1589,7 @@ const BookingApp = {
         createdBy: hasGroupon ? 'Reserva Web (Groupon)' : 'Reserva Web Online',
         createdAt: new Date().toISOString(),
         notes: hasGroupon
-          ? `[CUPÓN GROUPON: ${grouponCode}${grpOffer ? ' • ' + grpOffer.title : ''}] ${notesExtra || 'Reserva online con cupón de Groupon'}`
+          ? `[CUPÓN GROUPON: ${grouponCode}${grpOffer ? ' • ' + (grpOffer.serviceName || grpOffer.title) : ''}] ${notesExtra || 'Reserva online con cupón de Groupon'}`
           : (notesExtra ? `[RESERVA WEB] ${notesExtra}` : '[RESERVA WEB] Cita reservada online por el paciente')
       };
 
