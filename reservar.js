@@ -443,6 +443,15 @@ const BookingApp = {
   // ========================================================================
   // GESTIÓN DE OFERTAS Y CUPONES GROUPON (PASOS 1, 2 Y 4)
   // ========================================================================
+  formatGrouponDisplayLabel(offer, serviceName) {
+    const baseName = serviceName || (offer && (offer.serviceName || offer.title)) || '';
+    const offerTitle = offer && offer.title ? offer.title.trim() : '';
+    if (offerTitle && baseName && offerTitle !== baseName) {
+      return `${offerTitle} (${baseName})`;
+    }
+    return baseName || offerTitle;
+  },
+
   getEffectiveDuration() {
     if (this.hasGroupon && this.selectedGrouponOffer && Number(this.selectedGrouponOffer.duration) > 0) {
       return Number(this.selectedGrouponOffer.duration);
@@ -515,9 +524,11 @@ const BookingApp = {
           const priceTxt = isPrepago
             ? '0 € en clínica (Prepago Groupon)'
             : `${Number(o.grouponPrice).toFixed(2)} € en clínica`;
+          const baseName = o.serviceName || o.title || 'Oferta Groupon';
+          const shortDesc = o.description ? ` (${o.description.length > 35 ? o.description.substring(0, 35) + '...' : o.description})` : '';
           const opt = document.createElement('option');
           opt.value = o.id;
-          opt.textContent = `${o.title} • ${o.duration || 45} min (${priceTxt})`;
+          opt.textContent = `${baseName}${shortDesc} • ${o.duration || 45} min (${priceTxt})`;
           select.appendChild(opt);
         });
       } else {
@@ -583,9 +594,14 @@ const BookingApp = {
       const priceBadge = isPrepago
         ? '0,00 € en clínica (Ya pagado en Groupon)'
         : `${Number(offer.grouponPrice).toFixed(2)} € a abonar en clínica`;
-      const offerHeading = offer ? offer.title : service.name;
+      const offerHeading = offer ? (offer.serviceName || offer.title || service.name) : service.name;
+      const customAliasDiffers = offer && offer.title && offer.title !== service.name;
       const offerSub = offer
-        ? `Tratamiento incluido: <b>${service.name}</b>${offer.description ? ' • ' + offer.description : ''}`
+        ? (customAliasDiffers
+            ? `Tratamiento incluido: <b>${service.name}</b>${offer.description ? ' • ' + offer.description : ''}`
+            : (offer.description
+                ? `${offer.description}${Number(service.price) > 0 ? ` • Tarifa habitual: ${Number(service.price).toFixed(0)} €` : ''}`
+                : `Tratamiento oficial con tu cupón${Number(service.price) > 0 ? ` (tarifa habitual: ${Number(service.price).toFixed(0)} €)` : ''}`))
         : `Tratamiento seleccionado del catálogo (${service.duration || 45} min)`;
 
       previewHtml = `
@@ -776,7 +792,7 @@ const BookingApp = {
     const effDur = this.getEffectiveDuration();
     const priceInfo = this.getEffectivePriceInfo();
     const displayLabel = (this.hasGroupon && this.selectedGrouponOffer)
-      ? `${this.selectedGrouponOffer.title} (${this.selectedService.name})`
+      ? this.formatGrouponDisplayLabel(this.selectedGrouponOffer, this.selectedService.name)
       : this.selectedService.name;
 
     if (navSub) {
@@ -1135,7 +1151,7 @@ const BookingApp = {
     // Actualizar etiqueta del día
     const effDur = this.getEffectiveDuration();
     const displayLabel = (this.hasGroupon && this.selectedGrouponOffer)
-      ? this.selectedGrouponOffer.title
+      ? this.formatGrouponDisplayLabel(this.selectedGrouponOffer, this.selectedService.name)
       : this.selectedService.name;
     document.getElementById('cur-day-display').textContent = this.formatDateDisplay(dateStr);
     document.getElementById('slots-duration-hint').textContent = `Franjas de ${effDur} min adaptadas a "${displayLabel}"`;
@@ -1342,7 +1358,7 @@ const BookingApp = {
     const grpOffer = priceInfo.isGroupon ? this.selectedGrouponOffer : null;
 
     document.getElementById('sum-serv-name').textContent = grpOffer
-      ? `${grpOffer.title} (${this.selectedService.name})`
+      ? this.formatGrouponDisplayLabel(grpOffer, this.selectedService.name)
       : this.selectedService.name;
     document.getElementById('sum-serv-desc').textContent = (grpOffer && grpOffer.description)
       ? grpOffer.description
@@ -1620,7 +1636,7 @@ const BookingApp = {
     const dateFormatted = this.formatDateDisplay(appt.date);
     const isGroupon = appt.origin === 'groupon';
     const isFree = !isGroupon && Number(appt.price) === 0;
-    const grpTitleTxt = appt.grouponOfferTitle ? `${appt.grouponOfferTitle} • ` : '';
+    const grpTitleTxt = (appt.grouponOfferTitle && appt.grouponOfferTitle !== appt.serviceName) ? `${appt.grouponOfferTitle} • ` : '';
     const tarifaDisplay = isGroupon
       ? (Number(appt.price || 0) === 0
         ? `Cupón Groupon Prepago (${grpTitleTxt}Código: ${appt.grouponCode}) • 0,00 € en clínica`
@@ -1727,7 +1743,7 @@ const BookingApp = {
     this.switchStep(5);
 
     document.getElementById('success-ref-code').textContent = refCode;
-    document.getElementById('success-service-name').textContent = appt.grouponOfferTitle
+    document.getElementById('success-service-name').textContent = (appt.grouponOfferTitle && appt.grouponOfferTitle !== appt.serviceName)
       ? `${appt.grouponOfferTitle} (${appt.serviceName})`
       : appt.serviceName;
     document.getElementById('success-date-time').textContent = `${this.formatDateDisplay(appt.date)} a las ${appt.time} h`;
